@@ -1,0 +1,767 @@
+﻿{
+    "collection":  {
+                       "info":  {
+                                    "_postman_id":  "abd659ae-2811-4b93-a3bd-6a1b121d479b",
+                                    "name":  "DepEd Leave Management API",
+                                    "description":  "API collection for the DepEd Leave Management System",
+                                    "schema":  "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+                                    "createdAt":  "2026-06-15T01:44:45.000Z",
+                                    "updatedAt":  "2026-06-16T01:45:19.000Z",
+                                    "lastUpdatedBy":  "41962454",
+                                    "uid":  "41962454-abd659ae-2811-4b93-a3bd-6a1b121d479b"
+                                },
+                       "item":  [
+                                    {
+                                        "name":  "Employees",
+                                        "item":  [
+                                                     {
+                                                         "name":  "Create Employee",
+                                                         "id":  "41f89d8f-30ee-47ba-aaa9-6cfdd8793553",
+                                                         "request":  {
+                                                                         "method":  "POST",
+                                                                         "header":  [
+                                                                                        {
+                                                                                            "key":  "Content-Type",
+                                                                                            "value":  "application/json"
+                                                                                        }
+                                                                                    ],
+                                                                         "body":  {
+                                                                                      "mode":  "raw",
+                                                                                      "raw":  "{\\n  \"employee_number\": \"EMP-2024-0001\",\\n  \"first_name\": \"Juan\",\\n  \"last_name\": \"Dela Cruz\",\\n  \"middle_name\": \"Santos\",\\n  \"email\": \"juan.delacruz@deped.gov.ph\",\\n  \"employee_type\": \"TEACHING\",\\n  \"employment_status\": \"PERMANENT\",\\n  \"school_id\": 1,\\n  \"leave_card_number\": \"\"\\n}",
+                                                                                      "options":  {
+                                                                                                      "raw":  {
+                                                                                                                  "language":  "json"
+                                                                                                              }
+                                                                                                  }
+                                                                                  },
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/employees",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "employees"
+                                                                                              ]
+                                                                                 }
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T01:44:46.000Z",
+                                                         "updatedAt":  "2026-06-15T01:44:46.000Z",
+                                                         "uid":  "41962454-41f89d8f-30ee-47ba-aaa9-6cfdd8793553"
+                                                     },
+                                                     {
+                                                         "name":  "Get All Employees",
+                                                         "id":  "ed159f5c-8b1f-4f1d-a67c-951daf3e0876",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/employees?page=1\u0026limit=10",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "employees"
+                                                                                              ],
+                                                                                     "query":  [
+                                                                                                   {
+                                                                                                       "key":  "page",
+                                                                                                       "value":  "1"
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "key":  "limit",
+                                                                                                       "value":  "10"
+                                                                                                   }
+                                                                                               ]
+                                                                                 }
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T01:44:46.000Z",
+                                                         "updatedAt":  "2026-06-15T01:44:46.000Z",
+                                                         "uid":  "41962454-ed159f5c-8b1f-4f1d-a67c-951daf3e0876"
+                                                     },
+                                                     {
+                                                         "name":  "Get Employee by ID",
+                                                         "id":  "e377020a-9835-43e6-afc0-baf257d59b64",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/employees/1",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "employees",
+                                                                                                  "1"
+                                                                                              ]
+                                                                                 }
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T01:44:46.000Z",
+                                                         "updatedAt":  "2026-06-15T01:44:46.000Z",
+                                                         "uid":  "41962454-e377020a-9835-43e6-afc0-baf257d59b64"
+                                                     },
+                                                     {
+                                                         "name":  "Get Employee Count",
+                                                         "id":  "e4c6da43-f69d-4842-a195-8d595bd53b44",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/employees/count",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "employees",
+                                                                                                  "count"
+                                                                                              ]
+                                                                                 }
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T01:44:46.000Z",
+                                                         "updatedAt":  "2026-06-15T01:44:46.000Z",
+                                                         "uid":  "41962454-e4c6da43-f69d-4842-a195-8d595bd53b44"
+                                                     },
+                                                     {
+                                                         "name":  "Get Total Employee Pages",
+                                                         "id":  "4bdb52bb-5658-41b1-adee-cb0461012470",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/employees/pages?limit=10",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "employees",
+                                                                                                  "pages"
+                                                                                              ],
+                                                                                     "query":  [
+                                                                                                   {
+                                                                                                       "key":  "limit",
+                                                                                                       "value":  "10"
+                                                                                                   }
+                                                                                               ]
+                                                                                 }
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T01:44:46.000Z",
+                                                         "updatedAt":  "2026-06-15T01:44:46.000Z",
+                                                         "uid":  "41962454-4bdb52bb-5658-41b1-adee-cb0461012470"
+                                                     },
+                                                     {
+                                                         "name":  "Search Employees",
+                                                         "id":  "a58d8c0a-6027-4208-864a-4bb79464f4c8",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/employees/search?query=juan\u0026page=1\u0026limit=10",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "employees",
+                                                                                                  "search"
+                                                                                              ],
+                                                                                     "query":  [
+                                                                                                   {
+                                                                                                       "key":  "query",
+                                                                                                       "value":  "juan"
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "key":  "page",
+                                                                                                       "value":  "1"
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "key":  "limit",
+                                                                                                       "value":  "10"
+                                                                                                   }
+                                                                                               ]
+                                                                                 }
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T01:44:46.000Z",
+                                                         "updatedAt":  "2026-06-15T01:44:46.000Z",
+                                                         "uid":  "41962454-a58d8c0a-6027-4208-864a-4bb79464f4c8"
+                                                     },
+                                                     {
+                                                         "name":  "Update Employee",
+                                                         "id":  "16d04f00-9903-4c70-bae2-95edddda4409",
+                                                         "request":  {
+                                                                         "method":  "PUT",
+                                                                         "header":  [
+                                                                                        {
+                                                                                            "key":  "Content-Type",
+                                                                                            "value":  "application/json"
+                                                                                        }
+                                                                                    ],
+                                                                         "body":  {
+                                                                                      "mode":  "raw",
+                                                                                      "raw":  "{\\n  \"first_name\": \"Juan\",\\n  \"last_name\": \"Dela Cruz\",\\n  \"middle_name\": \"Santos\",\\n  \"email\": \"juan.delacruz@deped.gov.ph\",\\n  \"employee_type\": \"TEACHING\",\\n  \"employment_status\": \"PERMANENT\",\\n  \"school_id\": 1\\n}",
+                                                                                      "options":  {
+                                                                                                      "raw":  {
+                                                                                                                  "language":  "json"
+                                                                                                              }
+                                                                                                  }
+                                                                                  },
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/employees/1",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "employees",
+                                                                                                  "1"
+                                                                                              ]
+                                                                                 }
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T01:44:46.000Z",
+                                                         "updatedAt":  "2026-06-15T01:44:46.000Z",
+                                                         "uid":  "41962454-16d04f00-9903-4c70-bae2-95edddda4409"
+                                                     },
+                                                     {
+                                                         "name":  "Delete Employee",
+                                                         "id":  "3eabe756-7e9d-49c9-bebc-0337237ea864",
+                                                         "request":  {
+                                                                         "method":  "DELETE",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/employees/1",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "employees",
+                                                                                                  "1"
+                                                                                              ]
+                                                                                 }
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T01:44:46.000Z",
+                                                         "updatedAt":  "2026-06-15T01:44:46.000Z",
+                                                         "uid":  "41962454-3eabe756-7e9d-49c9-bebc-0337237ea864"
+                                                     },
+                                                     {
+                                                         "name":  "Get Employee Leave Balances",
+                                                         "id":  "ed15f6a3-d898-4d5a-8379-9dfae055f312",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/employees/1/leave-balances",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "employees",
+                                                                                                  "1",
+                                                                                                  "leave-balances"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Returns all leave balances for a specific employee, joined with leave type details (code, name, balance_type). Returns an empty data array if the employee has no balances yet."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-16T01:36:24.000Z",
+                                                         "updatedAt":  "2026-06-16T01:36:24.000Z",
+                                                         "uid":  "41962454-ed15f6a3-d898-4d5a-8379-9dfae055f312"
+                                                     }
+                                                 ],
+                                        "id":  "92ef835d-b6e1-4483-aff5-e4d078d6dcf2",
+                                        "createdAt":  "2026-06-15T01:44:46.000Z",
+                                        "updatedAt":  "2026-06-15T01:44:46.000Z",
+                                        "uid":  "41962454-92ef835d-b6e1-4483-aff5-e4d078d6dcf2"
+                                    },
+                                    {
+                                        "name":  "Leave Credits",
+                                        "item":  [
+                                                     {
+                                                         "name":  "Credit VL or SL Balance",
+                                                         "id":  "bb6621a3-2549-447e-8823-19243273daae",
+                                                         "request":  {
+                                                                         "method":  "POST",
+                                                                         "header":  [
+                                                                                        {
+                                                                                            "key":  "Content-Type",
+                                                                                            "value":  "application/json"
+                                                                                        }
+                                                                                    ],
+                                                                         "body":  {
+                                                                                      "mode":  "raw",
+                                                                                      "raw":  "{\\n  \"employee_id\": 1,\\n  \"leave_type_id\": 1,\\n  \"amount\": 1.25,\\n  \"transaction_date\": \"2026-06-15\",\\n  \"remarks\": \"Monthly VL credit\"\\n}",
+                                                                                      "options":  {
+                                                                                                      "raw":  {
+                                                                                                                  "language":  "json"
+                                                                                                              }
+                                                                                                  }
+                                                                                  },
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/leave-credits",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "leave-credits"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Credits VL or SL days to an employee\u0027s balance. leave_type_id must correspond to VL (id=1) or SL (id=2). Inserts a CREDIT into the ledger and updates the cached balance."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T02:03:21.000Z",
+                                                         "updatedAt":  "2026-06-15T02:03:21.000Z",
+                                                         "uid":  "41962454-bb6621a3-2549-447e-8823-19243273daae"
+                                                     }
+                                                 ],
+                                        "id":  "644f1392-8068-4987-aede-4fca8e4b19f1",
+                                        "createdAt":  "2026-06-15T02:03:21.000Z",
+                                        "updatedAt":  "2026-06-15T02:03:21.000Z",
+                                        "uid":  "41962454-644f1392-8068-4987-aede-4fca8e4b19f1"
+                                    },
+                                    {
+                                        "name":  "Leave Applications",
+                                        "item":  [
+                                                     {
+                                                         "name":  "Submit Leave Application",
+                                                         "id":  "958b3997-4359-4299-bc83-6a703f85060b",
+                                                         "request":  {
+                                                                         "method":  "POST",
+                                                                         "header":  [
+                                                                                        {
+                                                                                            "key":  "Content-Type",
+                                                                                            "value":  "application/json"
+                                                                                        }
+                                                                                    ],
+                                                                         "body":  {
+                                                                                      "mode":  "raw",
+                                                                                      "raw":  "{\\n  \"employee_id\": 1,\\n  \"leave_type_id\": 1,\\n  \"date_filed\": \"2026-06-15\",\\n  \"start_date\": \"2026-06-20\",\\n  \"end_date\": \"2026-06-22\",\\n  \"reason\": \"Personal matters\",\\n  \"with_pay\": true,\\n  \"other_leave_description\": null\\n}",
+                                                                                      "options":  {
+                                                                                                      "raw":  {
+                                                                                                                  "language":  "json"
+                                                                                                              }
+                                                                                                  }
+                                                                                  },
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/leave-applications",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "leave-applications"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Submits a leave application. Validates employee balance based on leave type rules:\\n- SELF (VL, SL, SPL): checks own balance\\n- CHARGED_TO_VL (FL): checks both FL entitlement and VL balance\\n- NONE (ML, PL, etc.): no balance check\\nApplication is created as PENDING. Balance is NOT deducted yet."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T02:30:29.000Z",
+                                                         "updatedAt":  "2026-06-15T02:30:29.000Z",
+                                                         "uid":  "41962454-958b3997-4359-4299-bc83-6a703f85060b"
+                                                     },
+                                                     {
+                                                         "name":  "Get Leave Application by ID",
+                                                         "id":  "e359e85c-2544-4308-8cee-2b5ab0c7af30",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/leave-applications/1",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "leave-applications",
+                                                                                                  "1"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Retrieves a single leave application by its primary key, including employee name and leave type details."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T02:30:29.000Z",
+                                                         "updatedAt":  "2026-06-15T02:30:29.000Z",
+                                                         "uid":  "41962454-e359e85c-2544-4308-8cee-2b5ab0c7af30"
+                                                     },
+                                                     {
+                                                         "name":  "Get Leave Applications by Employee",
+                                                         "id":  "c0e98737-a501-4e8a-bac8-9236718d4ed2",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/leave-applications/employee/1",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "leave-applications",
+                                                                                                  "employee",
+                                                                                                  "1"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Retrieves all leave applications submitted by a specific employee, ordered by date filed descending."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T02:30:29.000Z",
+                                                         "updatedAt":  "2026-06-15T02:30:29.000Z",
+                                                         "uid":  "41962454-c0e98737-a501-4e8a-bac8-9236718d4ed2"
+                                                     }
+                                                 ],
+                                        "id":  "d76fa2a9-1f05-430d-adbc-82d060f0ea23",
+                                        "createdAt":  "2026-06-15T02:30:29.000Z",
+                                        "updatedAt":  "2026-06-15T02:30:29.000Z",
+                                        "uid":  "41962454-d76fa2a9-1f05-430d-adbc-82d060f0ea23"
+                                    },
+                                    {
+                                        "name":  "Leave Approvals",
+                                        "item":  [
+                                                     {
+                                                         "name":  "Decide Leave Application",
+                                                         "id":  "020b1d7f-86cb-4d77-b4e8-c12c21a4bbae",
+                                                         "request":  {
+                                                                         "method":  "POST",
+                                                                         "header":  [
+                                                                                        {
+                                                                                            "key":  "Content-Type",
+                                                                                            "value":  "application/json"
+                                                                                        }
+                                                                                    ],
+                                                                         "body":  {
+                                                                                      "mode":  "raw",
+                                                                                      "raw":  "{\\n  \"leave_application_id\": 1,\\n  \"approver_id\": 2,\\n  \"level\": 1,\\n  \"status\": \"APPROVED\",\\n  \"remarks\": \"Approved as requested\"\\n}",
+                                                                                      "options":  {
+                                                                                                      "raw":  {
+                                                                                                                  "language":  "json"
+                                                                                                              }
+                                                                                                  }
+                                                                                  },
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/leave-approvals",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "leave-approvals"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Processes an approver decision on a PENDING leave application.\\n- APPROVED: records approval, posts DEBIT to ledger, deducts from balance cache\\n- REJECTED: records rejection, marks application as REJECTED\\nstatus must be APPROVED or REJECTED. Application must be PENDING."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T02:37:19.000Z",
+                                                         "updatedAt":  "2026-06-15T02:37:19.000Z",
+                                                         "uid":  "41962454-020b1d7f-86cb-4d77-b4e8-c12c21a4bbae"
+                                                     },
+                                                     {
+                                                         "name":  "Get Approvals by Application",
+                                                         "id":  "96c9ba0a-4690-4d4c-af86-682f312e8ee7",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/leave-approvals/application/1",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "leave-approvals",
+                                                                                                  "application",
+                                                                                                  "1"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Retrieves all approval records for a specific leave application, ordered by approval level ascending."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T02:37:19.000Z",
+                                                         "updatedAt":  "2026-06-15T02:37:19.000Z",
+                                                         "uid":  "41962454-96c9ba0a-4690-4d4c-af86-682f312e8ee7"
+                                                     }
+                                                 ],
+                                        "id":  "21f2f645-5035-4900-8c22-cae888afb860",
+                                        "createdAt":  "2026-06-15T02:37:19.000Z",
+                                        "updatedAt":  "2026-06-15T02:37:19.000Z",
+                                        "uid":  "41962454-21f2f645-5035-4900-8c22-cae888afb860"
+                                    },
+                                    {
+                                        "name":  "CTO Applications",
+                                        "item":  [
+                                                     {
+                                                         "name":  "Submit CTO Application",
+                                                         "id":  "5284d567-c002-414e-bc29-b84232c88d69",
+                                                         "request":  {
+                                                                         "method":  "POST",
+                                                                         "header":  [
+                                                                                        {
+                                                                                            "key":  "Content-Type",
+                                                                                            "value":  "application/json"
+                                                                                        }
+                                                                                    ],
+                                                                         "body":  {
+                                                                                      "mode":  "raw",
+                                                                                      "raw":  "{\\n  \"employee_id\": 1,\\n  \"activity_name\": \"Regional Year-End Assessment\",\\n  \"activity_start_date\": \"2026-06-10\",\\n  \"activity_end_date\": \"2026-06-12\",\\n  \"participation_start_date\": \"2026-06-10\",\\n  \"participation_end_date\": \"2026-06-12\",\\n  \"days_rendered\": 3,\\n  \"special_order_number\": \"SO-2026-001\"\\n}",
+                                                                                      "options":  {
+                                                                                                      "raw":  {
+                                                                                                                  "language":  "json"
+                                                                                                              }
+                                                                                                  }
+                                                                                  },
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/cto-applications",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "cto-applications"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Submits a CTO application documenting an activity/event rendered. Created as PENDING. CTO credit is NOT posted until approved."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T03:05:21.000Z",
+                                                         "updatedAt":  "2026-06-15T03:05:21.000Z",
+                                                         "uid":  "41962454-5284d567-c002-414e-bc29-b84232c88d69"
+                                                     },
+                                                     {
+                                                         "name":  "Decide CTO Application",
+                                                         "id":  "7e7605c1-6c95-4e53-95a4-0dadbaf3f1de",
+                                                         "request":  {
+                                                                         "method":  "POST",
+                                                                         "header":  [
+                                                                                        {
+                                                                                            "key":  "Content-Type",
+                                                                                            "value":  "application/json"
+                                                                                        }
+                                                                                    ],
+                                                                         "body":  {
+                                                                                      "mode":  "raw",
+                                                                                      "raw":  "{\\n  \"cto_application_id\": 1,\\n  \"approver_id\": 2,\\n  \"status\": \"APPROVED\",\\n  \"remarks\": \"Approved - activity verified\"\\n}",
+                                                                                      "options":  {
+                                                                                                      "raw":  {
+                                                                                                                  "language":  "json"
+                                                                                                              }
+                                                                                                  }
+                                                                                  },
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/cto-applications/decide",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "cto-applications",
+                                                                                                  "decide"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Processes an APPROVED or REJECTED decision on a PENDING CTO application.\\nOn APPROVED: posts a CREDIT to leave_credit_transactions (source_type=SPECIAL_ORDER) and updates the employee CTO balance cache.\\nOn REJECTED: records the rejection only."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T03:05:21.000Z",
+                                                         "updatedAt":  "2026-06-15T03:05:21.000Z",
+                                                         "uid":  "41962454-7e7605c1-6c95-4e53-95a4-0dadbaf3f1de"
+                                                     },
+                                                     {
+                                                         "name":  "Get CTO Application by ID",
+                                                         "id":  "a96e5e53-0962-4051-9946-d235bcbf30ab",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/cto-applications/1",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "cto-applications",
+                                                                                                  "1"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Retrieves a single CTO application by its primary key including employee details."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T03:05:21.000Z",
+                                                         "updatedAt":  "2026-06-15T03:05:21.000Z",
+                                                         "uid":  "41962454-a96e5e53-0962-4051-9946-d235bcbf30ab"
+                                                     },
+                                                     {
+                                                         "name":  "Get CTO Applications by Employee",
+                                                         "id":  "20dae41f-54fe-4403-9dd8-89e5600690e7",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/cto-applications/employee/1",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "cto-applications",
+                                                                                                  "employee",
+                                                                                                  "1"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Retrieves all CTO applications submitted by a specific employee, ordered by creation date descending."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-15T03:05:21.000Z",
+                                                         "updatedAt":  "2026-06-15T03:05:21.000Z",
+                                                         "uid":  "41962454-20dae41f-54fe-4403-9dd8-89e5600690e7"
+                                                     }
+                                                 ],
+                                        "id":  "ec4a6561-bb51-48ea-94fa-9771af5d0291",
+                                        "createdAt":  "2026-06-15T03:05:21.000Z",
+                                        "updatedAt":  "2026-06-15T03:05:21.000Z",
+                                        "uid":  "41962454-ec4a6561-bb51-48ea-94fa-9771af5d0291"
+                                    },
+                                    {
+                                        "name":  "Leave Types",
+                                        "item":  [
+                                                     {
+                                                         "name":  "Get All Leave Types",
+                                                         "id":  "c627792d-cf95-4f24-88e9-df4e5969cb94",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/leave-types",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "leave-types"
+                                                                                              ]
+                                                                                 },
+                                                                         "description":  "Returns all leave types ordered by code. Includes code, name, balance_type (SELF / CHARGED_TO_VL / NONE), and is_active flag."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-16T01:39:27.000Z",
+                                                         "updatedAt":  "2026-06-16T01:39:27.000Z",
+                                                         "uid":  "41962454-c627792d-cf95-4f24-88e9-df4e5969cb94"
+                                                     }
+                                                 ],
+                                        "id":  "a8ed997d-71b9-4ed0-9dc7-35ff3be6e15d",
+                                        "createdAt":  "2026-06-16T01:39:27.000Z",
+                                        "updatedAt":  "2026-06-16T01:39:27.000Z",
+                                        "uid":  "41962454-a8ed997d-71b9-4ed0-9dc7-35ff3be6e15d"
+                                    },
+                                    {
+                                        "name":  "Leave Credit Transactions",
+                                        "item":  [
+                                                     {
+                                                         "name":  "Get Transactions by Employee",
+                                                         "id":  "ae612d41-7ab7-43d0-a7e6-58d4570000dd",
+                                                         "request":  {
+                                                                         "method":  "GET",
+                                                                         "header":  [
+
+                                                                                    ],
+                                                                         "url":  {
+                                                                                     "raw":  "{{base_url}}/leave-credit-transactions/employee/1?page=1\u0026limit=10",
+                                                                                     "host":  [
+                                                                                                  "{{base_url}}"
+                                                                                              ],
+                                                                                     "path":  [
+                                                                                                  "leave-credit-transactions",
+                                                                                                  "employee",
+                                                                                                  "1"
+                                                                                              ],
+                                                                                     "query":  [
+                                                                                                   {
+                                                                                                       "key":  "page",
+                                                                                                       "value":  "1"
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "key":  "limit",
+                                                                                                       "value":  "10"
+                                                                                                   }
+                                                                                               ]
+                                                                                 },
+                                                                         "description":  "Returns paginated ledger transactions (CREDIT and DEBIT) for a specific employee, ordered by transaction date descending. Includes leave type code and name."
+                                                                     },
+                                                         "response":  [
+
+                                                                      ],
+                                                         "createdAt":  "2026-06-16T01:45:19.000Z",
+                                                         "updatedAt":  "2026-06-16T01:45:19.000Z",
+                                                         "uid":  "41962454-ae612d41-7ab7-43d0-a7e6-58d4570000dd"
+                                                     }
+                                                 ],
+                                        "id":  "e4907301-39f7-41f3-9ce6-e2378da4c659",
+                                        "createdAt":  "2026-06-16T01:45:19.000Z",
+                                        "updatedAt":  "2026-06-16T01:45:19.000Z",
+                                        "uid":  "41962454-e4907301-39f7-41f3-9ce6-e2378da4c659"
+                                    }
+                                ],
+                       "variable":  [
+                                        {
+                                            "key":  "base_url",
+                                            "value":  "http://localhost:5000",
+                                            "type":  "string"
+                                        }
+                                    ]
+                   }
+}
