@@ -1,6 +1,7 @@
-from flask import request, jsonify  # import request to read HTTP input and jsonify to build responses
+from flask import request, jsonify, send_from_directory  # import request/jsonify for HTTP I/O and send_from_directory to serve uploaded files
 from model.employee import Employee  # import the Employee model for all CRUD operations
 from pydantic import ValidationError  # import ValidationError to catch Pydantic validation failures
+from gateway.file_storage_gateway import verify_signed_url  # import signature verification for private photo access
 
 
 def create_employee():
@@ -185,6 +186,52 @@ def search_employees():
 
     except Exception as e:  # catch unexpected errors
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
+
+
+def upload_employee_photo(employee_id: int):
+    """
+    Handles POST /employees/<employee_id>/photo — uploads and saves a new photo for an employee.
+    Expects a multipart/form-data request with a 'photo' file field.
+
+    Parameters:
+        employee_id (int): The employee's primary key from the URL.
+
+    Returns:
+        JSON response with the updated employee data and HTTP 200, or an error response.
+    """
+    try:
+        file = request.files.get("photo")  # read the uploaded file from the multipart form
+
+        result = Employee.upload_photo(employee_id, file)  # delegate to the Employee model
+        return jsonify(result), result["statusCode"]  # return result with its own status code
+
+    except Exception as e:  # catch unexpected errors
+        return jsonify({"message": str(e)}), 500  # return 500 with error detail
+
+
+def get_employee_photo(filename: str):
+    """
+    Handles GET /uploads/employee_photos/<filename> — serves a previously uploaded employee photo.
+    Requires a valid, non-expired 'expires' and 'signature' query param (see generate_signed_url).
+
+    Parameters:
+        filename (str): The name of the photo file on disk, from the URL.
+
+    Returns:
+        The image file, or a 403/404 response if the signature is invalid/expired or the file is missing.
+    """
+    try:
+        path = f"uploads/employee_photos/{filename}"  # reconstruct the relative path that was originally signed
+        expires = request.args.get("expires")  # read the expiry timestamp from the query string
+        signature = request.args.get("signature")  # read the signature from the query string
+
+        if not verify_signed_url(path, expires, signature):  # check the signature is valid and not expired
+            return jsonify({"message": "Invalid or expired photo URL"}), 403  # reject with 403 if verification fails
+
+        return send_from_directory("uploads/employee_photos", filename)  # serve the file from the upload directory
+
+    except Exception as e:  # catch unexpected errors (e.g. file not found)
+        return jsonify({"message": str(e)}), 404  # return 404 with error detail
 
 
 def get_employee_leave_balances(employee_id: int):

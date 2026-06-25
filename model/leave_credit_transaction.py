@@ -92,3 +92,52 @@ class LeaveCreditTransaction(BaseModel):
 
         except Exception as e:  # catch unexpected errors
             return {"statusCode": 500, "message": str(e)}  # return 500 with error detail
+
+    # --------------------------
+    # Get transactions by employee and year
+    # --------------------------
+
+    @staticmethod
+    def get_by_employee_and_year(employee_id: int, year: int) -> dict:
+        """
+        Retrieves all ledger transactions for a specific employee within a given year,
+        ordered by transaction date descending. Joins with leave_types for context.
+
+        Parameters:
+            employee_id (int): The primary key of the employee.
+            year (int): The calendar year to filter by (e.g. 2026).
+
+        Returns:
+            dict: statusCode 200 with transaction data and year context, or 404 if employee not found.
+        """
+        try:
+            employee = fetch_query(  # verify the employee exists
+                "SELECT id, first_name, last_name, employee_number FROM employees WHERE id = %s",
+                [employee_id]
+            )
+
+            if not employee:  # employee not found
+                return {"statusCode": 404, "message": "Employee not found"}  # return 404
+
+            rows = fetch_query(  # fetch all transactions for the employee in the given year
+                """SELECT lct.*,
+                          lt.code AS leave_type_code,
+                          lt.name AS leave_type_name
+                   FROM leave_credit_transactions lct
+                   JOIN leave_types lt ON lt.id = lct.leave_type_id
+                   WHERE lct.employee_id = %s
+                     AND YEAR(lct.transaction_date) = %s
+                   ORDER BY lct.transaction_date DESC, lct.id DESC""",
+                [employee_id, year]
+            )
+
+            return {  # return results for the given year
+                "statusCode": 200,  # success code
+                "employee": employee[0],  # basic employee info for context
+                "year": year,  # the year filter applied
+                "count": len(rows),  # total records returned
+                "data": rows if rows else [],  # list of transactions, empty if none
+            }
+
+        except Exception as e:  # catch unexpected errors
+            return {"statusCode": 500, "message": str(e)}  # return 500 with error detail

@@ -284,3 +284,14 @@ Key fields:
 
 - Add a docstring to every function documenting what it does and its parameters
 - Add an inline comment on each line briefly explaining what it does
+- 14 days max for school leave application
+- no limit for leave application for division account
+- only admin accounts can upload special orders(cto and vsc)
+- holiday refund
+- only admin accounts can set holidays
+- teaching, can apply teaching leave only
+- division, all leaves but no admin access
+- inclusive dates instead of date range
+- add a function to manually add vl/sl
+- idempotency using date of leave as key
+- valid until as sorting

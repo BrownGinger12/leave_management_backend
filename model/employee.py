@@ -2,6 +2,7 @@ from pydantic import BaseModel  # import BaseModel as the base for all models
 from typing import Optional  # import Optional for nullable fields
 from enum import Enum  # import Enum for fixed-value fields
 from gateway.mysql_gateway import fetch_query, query, query_insert  # import gateway functions
+from gateway.file_storage_gateway import is_allowed_file, save_file, delete_file, generate_signed_url  # import file storage gateway functions
 import uuid  # import uuid to generate unique leave card numbers
 
 
@@ -26,6 +27,14 @@ class Employee(BaseModel):
         employee_type: TEACHING or NON_TEACHING.
         employment_status: Employment status (e.g. PERMANENT, TEMPORARY).
         school_id: Foreign key reference to the school/office.
+        division: Division name (optional).
+        original_appointment: Date of original appointment (optional).
+        latest_appointment: Date of latest appointment (optional).
+        position: Job position/title (optional).
+        salary: Monthly salary (optional).
+        contact_number: Employee's contact number (optional).
+        is_active: Whether the employee is active (False = soft-deleted).
+        photo: Path/URL to the employee's photo (optional).
     """
     id: Optional[int] = None  # primary key, set by the database
     leave_card_number: Optional[str] = None  # system-generated, set on create
@@ -37,6 +46,37 @@ class Employee(BaseModel):
     employee_type: str  # TEACHING or NON_TEACHING
     employment_status: str  # e.g. PERMANENT, TEMPORARY, CASUAL
     school_id: int  # foreign key to the school/office
+    division: Optional[str] = None  # division name, optional
+    original_appointment: Optional[str] = None  # date of original appointment (YYYY-MM-DD), optional
+    latest_appointment: Optional[str] = None  # date of latest appointment (YYYY-MM-DD), optional
+    position: Optional[str] = None  # job position or title, optional
+    salary: Optional[float] = None  # monthly salary, optional
+    contact_number: Optional[str] = None  # employee contact number, optional
+    is_active: Optional[bool] = True  # True = active, False = soft-deleted
+    photo: Optional[str] = None  # path/URL to the employee's photo, optional
+
+    # --------------------------
+    # Sign employee photo path
+    # --------------------------
+
+    @staticmethod
+    def _with_signed_photo(row: dict) -> dict:
+        """
+        Returns a copy of an employee row with its 'photo' field replaced by a
+        signed, expiring URL so the raw filesystem path is never exposed.
+
+        Parameters:
+            row (dict): An employee record as returned from the database.
+
+        Returns:
+            dict: The employee record with 'photo' replaced by a signed URL (if set).
+        """
+        if not row:  # nothing to do if row is empty/None
+            return row  # return as-is
+        result = dict(row)  # copy the row so the original is not mutated
+        if result.get("photo"):  # only sign if a photo path is actually set
+            result["photo"] = generate_signed_url(result["photo"])  # replace raw path with signed URL
+        return result  # return the (possibly modified) copy
 
     # --------------------------
     # Generate leave card number
@@ -91,18 +131,28 @@ class Employee(BaseModel):
             result = query_insert(  # execute INSERT and return the new row ID
                 """INSERT INTO employees
                        (leave_card_number, employee_number, first_name, last_name,
-                        middle_name, email, employee_type, employment_status, school_id)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        middle_name, email, employee_type, employment_status, school_id,
+                        division, original_appointment, latest_appointment,
+                        position, salary, contact_number, is_active, photo)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 [
-                    leave_card_number,          # generated leave card number
-                    data["employee_number"],    # DepEd employee number
-                    data["first_name"],         # first name
-                    data["last_name"],          # last name
-                    data.get("middle_name"),    # middle name, may be None
-                    data["email"],              # email address
-                    data["employee_type"],      # TEACHING or NON_TEACHING
-                    data["employment_status"],  # employment status
-                    data["school_id"],          # school/office ID
+                    leave_card_number,                   # generated leave card number
+                    data["employee_number"],             # DepEd employee number
+                    data["first_name"],                  # first name
+                    data["last_name"],                   # last name
+                    data.get("middle_name"),             # middle name, may be None
+                    data["email"],                       # email address
+                    data["employee_type"],               # TEACHING or NON_TEACHING
+                    data["employment_status"],           # employment status
+                    data["school_id"],                   # school/office ID
+                    data.get("division"),                # division name, may be None
+                    data.get("original_appointment"),    # date of original appointment, may be None
+                    data.get("latest_appointment"),      # date of latest appointment, may be None
+                    data.get("position"),                # job position or title, may be None
+                    data.get("salary"),                  # monthly salary, may be None
+                    data.get("contact_number"),          # contact number, may be None
+                    data.get("is_active", True),         # active status, defaults to True
+                    data.get("photo"),                   # photo path/URL, may be None
                 ]
             )
 
@@ -116,7 +166,7 @@ class Employee(BaseModel):
             return {  # return success response
                 "statusCode": 201,  # 201 Created
                 "message": "Employee created",  # confirmation message
-                "data": rows[0] if rows else None,  # the created employee record
+                "data": Employee._with_signed_photo(rows[0]) if rows else None,  # the created employee record, with signed photo URL
             }
 
         except Exception as e:  # catch unexpected errors
@@ -157,7 +207,7 @@ class Employee(BaseModel):
                 "total": total,  # total number of employees in the database
                 "page": page,  # current page number
                 "limit": limit,  # records per page
-                "data": rows,  # the employee records
+                "data": [Employee._with_signed_photo(row) for row in rows],  # the employee records, with signed photo URLs
             }
 
         except Exception as e:  # catch unexpected errors
@@ -185,7 +235,7 @@ class Employee(BaseModel):
 
             return {  # return found employee
                 "statusCode": 200,  # success code
-                "data": rows[0],  # the single employee record
+                "data": Employee._with_signed_photo(rows[0]),  # the single employee record, with signed photo URL
             } if rows else {  # return 404 if not found
                 "statusCode": 404,
                 "message": f"Employee {employee_id} not found",
@@ -231,7 +281,9 @@ class Employee(BaseModel):
         try:
             allowed_fields = [  # fields that are permitted to be updated
                 "first_name", "last_name", "middle_name",
-                "email", "employee_type", "employment_status", "school_id"
+                "email", "employee_type", "employment_status", "school_id",
+                "division", "original_appointment", "latest_appointment",
+                "position", "salary", "contact_number", "is_active", "photo"
             ]
 
             fields = {  # filter to only allowed, non-None fields
@@ -265,7 +317,7 @@ class Employee(BaseModel):
             return {  # return success response
                 "statusCode": 200,  # success code
                 "message": "Employee updated",  # confirmation message
-                "data": rows[0] if rows else None,  # the updated record
+                "data": Employee._with_signed_photo(rows[0]) if rows else None,  # the updated record, with signed photo URL
             }
 
         except Exception as e:  # catch unexpected errors
@@ -327,21 +379,87 @@ class Employee(BaseModel):
             offset = (page - 1) * limit  # calculate row offset for pagination
             like = f"%{query_str}%"  # wrap the search term with wildcards for LIKE matching
 
-            rows = fetch_query(  # search employees across name, number, and email fields
+            rows = fetch_query(  # search employees across name, numbers, and email fields
                 """SELECT * FROM employees
                    WHERE first_name LIKE %s OR last_name LIKE %s
-                      OR employee_number LIKE %s OR email LIKE %s
+                      OR employee_number LIKE %s OR leave_card_number LIKE %s
+                      OR email LIKE %s
                    ORDER BY id LIMIT %s OFFSET %s""",
-                [like, like, like, like, limit, offset]
+                [like, like, like, like, like, limit, offset]
             )
 
             return {  # return matching results
                 "statusCode": 200,  # success code
                 "count": len(rows),  # number of results returned
-                "data": rows,  # the matching employee records
+                "data": [Employee._with_signed_photo(row) for row in rows],  # the matching employee records, with signed photo URLs
             } if rows else {  # return 404 if no matches
                 "statusCode": 404,
                 "message": "No employees found matching the query",
+            }
+
+        except Exception as e:  # catch unexpected errors
+            return {"statusCode": 500, "message": str(e)}  # return 500 with error detail
+
+    # --------------------------
+    # Upload employee photo
+    # --------------------------
+
+    @staticmethod
+    def upload_photo(employee_id: int, file) -> dict:
+        """
+        Uploads and saves a new photo for an employee to the server's local filesystem,
+        replacing any previously uploaded photo.
+
+        Parameters:
+            employee_id (int): The primary key of the employee.
+            file (FileStorage): The uploaded photo file from the request.
+
+        Returns:
+            dict: statusCode 200 with the updated employee data, or an error dict.
+        """
+        try:
+            if not file or file.filename == "":  # check a file was actually provided
+                return {"statusCode": 400, "message": "No photo file provided"}  # return 400 if missing
+
+            if not is_allowed_file(file.filename):  # validate the file extension
+                return {"statusCode": 400, "message": "Unsupported file type. Allowed: png, jpg, jpeg, gif"}  # return 400 if disallowed
+
+            existing = fetch_query(  # verify the employee exists and get the current photo path
+                "SELECT id, photo FROM employees WHERE id = %s", [employee_id]
+            )
+
+            if not existing:  # employee not found
+                return {"statusCode": 404, "message": "Employee not found"}  # return 404
+
+            extension = file.filename.rsplit(".", 1)[1].lower()  # extract the file extension
+            unique_filename = f"{uuid.uuid4().hex}.{extension}"  # generate a unique filename to avoid collisions
+
+            save_result = save_file(file, unique_filename)  # save the file to disk via the storage gateway
+
+            if save_result["statusCode"] != 200:  # check if saving the file failed
+                return save_result  # return the error from the gateway
+
+            old_photo = existing[0]["photo"]  # capture the old photo path for cleanup after update
+
+            result = query(  # update the employee's photo column with the new path
+                "UPDATE employees SET photo = %s WHERE id = %s",
+                [save_result["path"], employee_id]
+            )
+
+            if result["statusCode"] != 200:  # check if the update failed
+                return result  # return the error from the gateway
+
+            if old_photo:  # an old photo existed before this upload
+                delete_file(old_photo)  # remove the old photo file from disk
+
+            rows = fetch_query(  # fetch the updated employee record
+                "SELECT * FROM employees WHERE id = %s", [employee_id]
+            )
+
+            return {  # return success response
+                "statusCode": 200,  # success code
+                "message": "Employee photo uploaded successfully",  # confirmation message
+                "data": Employee._with_signed_photo(rows[0]) if rows else None,  # the updated employee record, with signed photo URL
             }
 
         except Exception as e:  # catch unexpected errors
