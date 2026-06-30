@@ -261,10 +261,13 @@ class LeaveApplication(BaseModel):
                 app["total_days"] = round(  # sum up all date contributions
                     sum(1.0 if d["duration_type"] == "FULL_DAY" else 0.5 for d in dates), 2
                 )
-            else:  # no dates attached yet (edge case)
+            else:  # no dates — either an edge case or a monetization application
                 app["start_date"] = None  # no start date derivable
                 app["end_date"] = None  # no end date derivable
-                app["total_days"] = 0.0  # zero days
+                mnt_total = round(  # for MNT applications, total comes from the vl+sl columns
+                    float(app.get("mnt_vl_days") or 0) + float(app.get("mnt_sl_days") or 0), 2
+                )
+                app["total_days"] = mnt_total if mnt_total > 0 else 0.0  # use monetization total or zero
         return rows  # return the enriched rows
 
     # --------------------------
@@ -346,6 +349,15 @@ class LeaveApplication(BaseModel):
             recalculate_ledger_snapshots(employee_id, vl_leave_type_id)  # cascade-recalculate all VL snapshots
             return None  # both FL and VL debits posted successfully
 
+        if balance_type == "CHARGED_TO_VSC":  # PR — cascade through new VSC credits via per-credit log
+            return LeaveApplication._deduct_vsc(  # delegate to VSC-specific cascading deduction (new credits only)
+                employee_id=employee_id,
+                total_days=total_days,
+                application_id=application_id,
+                start_date=start_date,
+                leave_type_code=leave_type_code,  # "PR"
+            )
+
         # SELF — deduct from the leave type's own balance only
         if leave_type_code == "CTO":  # CTO deduction cascades across per-credit balances by earliest valid_until
             return LeaveApplication._deduct_cto(  # delegate to CTO-specific cascading deduction
@@ -355,6 +367,27 @@ class LeaveApplication(BaseModel):
                 application_id=application_id,
                 start_date=start_date,
             )
+
+        if leave_type_code == "SL":  # SL: use VSC credits first (old then new) if they can fully cover
+            old_row = fetch_query(  # sum remaining old VSC credits
+                "SELECT COALESCE(SUM(remaining_balance), 0.0) AS total FROM vsc_old_credit_balances WHERE employee_id = %s AND remaining_balance > 0",
+                [employee_id]
+            )
+            new_row = fetch_query(  # sum remaining new VSC credits
+                "SELECT COALESCE(SUM(remaining_balance), 0.0) AS total FROM vsc_new_credit_balances WHERE employee_id = %s AND remaining_balance > 0",
+                [employee_id]
+            )
+            total_vsc = float(old_row[0]["total"]) + float(new_row[0]["total"])  # combined VSC available
+
+            if total_vsc >= total_days:  # VSC can fully cover — deduct from VSC, leave regular SL balance untouched
+                return LeaveApplication._deduct_vsc(  # cascade old VSC then new VSC
+                    employee_id=employee_id,
+                    total_days=total_days,
+                    application_id=application_id,
+                    start_date=start_date,
+                    leave_type_code="SL",
+                )
+            # VSC insufficient — fall through to deduct from regular SL balance below
 
         insert_result = query_insert(  # insert the DEBIT record for SELF leave types
             """INSERT INTO leave_credit_transactions
@@ -530,6 +563,291 @@ class LeaveApplication(BaseModel):
         return None  # all deductions posted successfully
 
     # --------------------------
+    # Deduct VSC credits for SL / PR leave
+    # --------------------------
+
+    @staticmethod
+    def _deduct_vsc(employee_id: int, total_days: float, application_id: int,
+                    start_date: str, leave_type_code: str) -> dict | None:
+        """
+        Cascades VSC deductions for SL or PR leave applications.
+        For SL: deducts from old credits first (ORDER BY id ASC), then new credits if old is exhausted.
+        For PR: deducts from new credits only (ORDER BY id ASC).
+        Posts a separate DEBIT ledger entry per credit consumed and logs each deduction
+        in vsc_deduction_log for reversal tracking. Clears stale log entries before inserting
+        to handle re-activation of a previously reversed application cleanly.
+
+        Parameters:
+            employee_id (int): The employee whose VSC credits are being deducted.
+            total_days (float): Total leave days to deduct.
+            application_id (int): The source leave application ID.
+            start_date (str): Earliest leave date (YYYY-MM-DD) used as transaction_date.
+            leave_type_code (str): 'SL' or 'PR' — determines which credit pools to use.
+
+        Returns:
+            dict | None: An error dict if any step fails, None on full success.
+        """
+        vsc_type = fetch_query(  # fetch the VSC leave type ID for ledger entries
+            "SELECT id FROM leave_types WHERE code = 'VSC'", []
+        )
+        if not vsc_type:  # VSC type not found in system
+            return {"statusCode": 500, "message": "VSC leave type not found in the system"}  # return error
+        vsc_leave_type_id = vsc_type[0]["id"]  # VSC leave type ID used for all DEBIT ledger entries
+
+        query(  # clear stale log entries before inserting fresh ones (handles re-activation)
+            "DELETE FROM vsc_deduction_log WHERE leave_application_id = %s",
+            [application_id]
+        )
+
+        remaining = round(total_days, 2)  # track outstanding days still to be deducted
+
+        if leave_type_code == "SL":  # SL: process old credits first before touching new credits
+            old_credits = fetch_query(  # fetch old VSC credits with balance remaining, oldest ID first
+                "SELECT id, remaining_balance FROM vsc_old_credit_balances WHERE employee_id = %s AND remaining_balance > 0 ORDER BY id ASC",
+                [employee_id]
+            )
+            for credit in (old_credits or []):  # iterate old credits until remaining is satisfied
+                if remaining <= 0:  # all days accounted for — stop early
+                    break
+                deduct = round(min(float(credit["remaining_balance"]), remaining), 2)  # take as much as this credit can give
+
+                upd = query(  # reduce this old credit's remaining balance
+                    "UPDATE vsc_old_credit_balances SET remaining_balance = remaining_balance - %s WHERE id = %s",
+                    [deduct, credit["id"]]
+                )
+                if upd["statusCode"] != 200:  # check if update failed
+                    return upd  # return the error
+
+                log_result = query_insert(  # record deduction amount for reversal tracking
+                    "INSERT INTO vsc_deduction_log (leave_application_id, credit_pool, credit_balance_id, amount_deducted) VALUES (%s, 'OLD', %s, %s)",
+                    [application_id, credit["id"], deduct]
+                )
+                if log_result["statusCode"] != 200:  # check if log insert failed
+                    return log_result  # return the error
+
+                txn_result = query_insert(  # post DEBIT to VSC ledger for this partial deduction
+                    """INSERT INTO leave_credit_transactions
+                           (transaction_number, employee_id, leave_type_id, transaction_type,
+                            amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+                       VALUES (%s, %s, %s, 'DEBIT', %s, 'LEAVE_APPLICATION', %s, %s, 0, %s)""",
+                    [
+                        LeaveApplication._generate_transaction_number(),  # unique transaction number
+                        employee_id,           # employee being debited
+                        vsc_leave_type_id,     # VSC leave type for the ledger entry
+                        deduct,                # days deducted from this specific credit
+                        application_id,        # source leave application
+                        start_date,            # earliest leave date as transaction_date
+                        f"Leave application submitted — VSC (old) charged for {leave_type_code}",  # audit trail
+                    ]
+                )
+                if txn_result["statusCode"] != 200:  # check if ledger insert failed
+                    return txn_result  # return the error
+
+                remaining = round(remaining - deduct, 2)  # reduce outstanding amount
+
+        if remaining > 0:  # for SL (after old exhausted) and PR: process new credits
+            new_credits = fetch_query(  # fetch new VSC credits with balance remaining, oldest ID first
+                "SELECT id, remaining_balance FROM vsc_new_credit_balances WHERE employee_id = %s AND remaining_balance > 0 ORDER BY id ASC",
+                [employee_id]
+            )
+            for credit in (new_credits or []):  # iterate new credits until remaining is satisfied
+                if remaining <= 0:  # all days accounted for — stop early
+                    break
+                deduct = round(min(float(credit["remaining_balance"]), remaining), 2)  # take as much as this credit can give
+
+                upd = query(  # reduce this new credit's remaining balance
+                    "UPDATE vsc_new_credit_balances SET remaining_balance = remaining_balance - %s WHERE id = %s",
+                    [deduct, credit["id"]]
+                )
+                if upd["statusCode"] != 200:  # check if update failed
+                    return upd  # return the error
+
+                log_result = query_insert(  # record deduction amount for reversal tracking
+                    "INSERT INTO vsc_deduction_log (leave_application_id, credit_pool, credit_balance_id, amount_deducted) VALUES (%s, 'NEW', %s, %s)",
+                    [application_id, credit["id"], deduct]
+                )
+                if log_result["statusCode"] != 200:  # check if log insert failed
+                    return log_result  # return the error
+
+                txn_result = query_insert(  # post DEBIT to VSC ledger for this partial deduction
+                    """INSERT INTO leave_credit_transactions
+                           (transaction_number, employee_id, leave_type_id, transaction_type,
+                            amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+                       VALUES (%s, %s, %s, 'DEBIT', %s, 'LEAVE_APPLICATION', %s, %s, 0, %s)""",
+                    [
+                        LeaveApplication._generate_transaction_number(),  # unique transaction number
+                        employee_id,           # employee being debited
+                        vsc_leave_type_id,     # VSC leave type for the ledger entry
+                        deduct,                # days deducted from this specific credit
+                        application_id,        # source leave application
+                        start_date,            # earliest leave date as transaction_date
+                        f"Leave application submitted — VSC (new) charged for {leave_type_code}",  # audit trail
+                    ]
+                )
+                if txn_result["statusCode"] != 200:  # check if ledger insert failed
+                    return txn_result  # return the error
+
+                remaining = round(remaining - deduct, 2)  # reduce outstanding amount
+
+        recalculate_ledger_snapshots(employee_id, vsc_leave_type_id)  # recalculate all VSC ledger snapshots once
+        return None  # all VSC deductions posted successfully
+
+    # --------------------------
+    # Holiday refund — credit back overlapping leave balances
+    # --------------------------
+
+    @staticmethod
+    def _refund_holiday(holiday_date: str, holiday_period: str, calendar_event_id: int) -> None:
+        """
+        Runs in a background thread when a holiday is created or activated.
+        Finds all active (non-deleted, non-reversed) leave applications that have a date
+        overlapping with the holiday, credits back the appropriate balance per application,
+        and records each refund in the leave_refunded_dates table.
+        Idempotent: skips any application that already has a row in leave_refunded_dates
+        for the given holiday_date.
+
+        Holiday period matching rules:
+          FULL → any leave date on that day (full-day or half-day)
+          AM   → full-day leaves (refund 0.5) and AM half-day leaves (refund 0.5)
+          PM   → full-day leaves (refund 0.5) and PM half-day leaves (refund 0.5)
+
+        Balance credit rules mirror the deduction rules:
+          NONE            → skip (no balance was deducted)
+          SELF (non-CTO)  → credit own leave type
+          SELF (CTO)      → credit CTO ledger
+          SELF (SL+VSC)   → credit VSC ledger (SL was funded by VSC)
+          CHARGED_TO_VL   → credit both FL and VL
+          CHARGED_TO_VSC  → credit VSC
+
+        Parameters:
+            holiday_date (str): The holiday date in YYYY-MM-DD format.
+            holiday_period (str): 'FULL', 'AM', or 'PM'.
+            calendar_event_id (int): The calendar_events.id of the holiday (used as source_id).
+        """
+        try:
+            if holiday_period == "AM":  # AM holiday: match full-day or AM half-day leaves
+                period_filter = "(lad.duration_type = 'FULL_DAY' OR (lad.duration_type = 'HALF_DAY' AND lad.half_day_period = 'AM'))"
+            elif holiday_period == "PM":  # PM holiday: match full-day or PM half-day leaves
+                period_filter = "(lad.duration_type = 'FULL_DAY' OR (lad.duration_type = 'HALF_DAY' AND lad.half_day_period = 'PM'))"
+            else:  # FULL holiday: match any leave on this date
+                period_filter = "1=1"
+
+            rows = fetch_query(  # find all active leave apps with a date on this holiday
+                f"""SELECT la.id AS application_id, la.employee_id, la.leave_type_id,
+                           lt.code AS leave_type_code, lt.balance_type,
+                           lad.duration_type, lad.half_day_period
+                    FROM leave_application_dates lad
+                    JOIN leave_applications la ON la.id = lad.leave_application_id
+                    JOIN leave_types lt ON lt.id = la.leave_type_id
+                    WHERE lad.leave_date = %s
+                      AND {period_filter}
+                      AND la.is_deleted = 0
+                      AND la.status NOT IN ('RETURNED', 'DISAPPROVED')""",
+                [holiday_date]
+            )
+
+            vl_type = fetch_query("SELECT id FROM leave_types WHERE code = 'VL'", [])  # fetch VL type once
+            vl_type_id = vl_type[0]["id"] if vl_type else None  # VL leave type ID
+            vsc_type = fetch_query("SELECT id FROM leave_types WHERE code = 'VSC'", [])  # fetch VSC type once
+            vsc_type_id = vsc_type[0]["id"] if vsc_type else None  # VSC leave type ID
+
+            for row in (rows or []):  # process each overlapping leave application
+                application_id = row["application_id"]  # leave application primary key
+                employee_id = row["employee_id"]  # employee being refunded
+                leave_type_id = row["leave_type_id"]  # leave type of the application
+                code = row["leave_type_code"]  # short leave code (VL, SL, CTO, etc.)
+                balance_type = row["balance_type"]  # SELF, CHARGED_TO_VL, CHARGED_TO_VSC, NONE
+
+                already_refunded = fetch_query(  # idempotency check: skip if already processed for this date
+                    "SELECT id FROM leave_refunded_dates WHERE leave_application_id = %s AND holiday_date = %s LIMIT 1",
+                    [application_id, holiday_date]
+                )
+                if already_refunded:  # refund already recorded for this application + date combination
+                    continue  # skip — idempotency guard
+
+                if holiday_period == "FULL":  # full-day holiday
+                    refund_amount = 1.0 if row["duration_type"] == "FULL_DAY" else 0.5  # full or half
+                else:  # AM or PM holiday — always 0.5 regardless of leave duration_type
+                    refund_amount = 0.5
+
+                credits_to_post = []  # collect (leave_type_id, amount) pairs to credit
+
+                if balance_type == "NONE":  # no balance was deducted — nothing to refund
+                    pass  # skip credit posting for NONE types
+
+                elif balance_type == "CHARGED_TO_VL":  # FL — credit back both FL and VL
+                    credits_to_post.append((leave_type_id, refund_amount))  # FL entitlement credit
+                    if vl_type_id:  # also credit VL balance
+                        credits_to_post.append((vl_type_id, refund_amount))  # VL credit
+
+                elif balance_type == "CHARGED_TO_VSC":  # PR — credit VSC balance
+                    if vsc_type_id:  # credit VSC ledger
+                        credits_to_post.append((vsc_type_id, refund_amount))  # VSC credit
+
+                else:  # SELF — determine effective leave type
+                    if code == "SL":  # SL may have used VSC credits instead of regular SL balance
+                        vsc_log = fetch_query(  # check if this SL app deducted from VSC
+                            "SELECT id FROM vsc_deduction_log WHERE leave_application_id = %s LIMIT 1",
+                            [application_id]
+                        )
+                        effective_id = vsc_type_id if vsc_log else leave_type_id  # VSC or regular SL
+                    else:  # all other SELF types (VL, SPL, CTO, etc.)
+                        effective_id = leave_type_id  # credit own leave type
+
+                    if effective_id:  # post credit to the effective type
+                        credits_to_post.append((effective_id, refund_amount))  # own-type credit
+
+                for credit_type_id, credit_amount in credits_to_post:  # post each collected credit
+                    LeaveApplication._post_holiday_credit(  # insert CREDIT ledger entry
+                        employee_id, credit_type_id, credit_amount, calendar_event_id, holiday_date, code
+                    )
+                    recalculate_ledger_snapshots(employee_id, credit_type_id)  # update cached balance
+                    query_insert(  # record this refund in the dedicated table
+                        """INSERT INTO leave_refunded_dates
+                               (leave_application_id, calendar_event_id, holiday_date,
+                                amount_refunded, credited_leave_type_id)
+                           VALUES (%s, %s, %s, %s, %s)""",
+                        [application_id, calendar_event_id, holiday_date, credit_amount, credit_type_id]
+                    )
+
+        except Exception as e:  # catch all errors — this runs in a background thread
+            import traceback  # import here to keep it out of the module-level namespace
+            print(f"[holiday_refund] Error processing {holiday_date}: {e}")  # log the short message
+            traceback.print_exc()  # print the full stack trace so the root cause is visible
+
+    @staticmethod
+    def _post_holiday_credit(employee_id: int, leave_type_id: int, amount: float,
+                              calendar_event_id: int, holiday_date: str, leave_type_code: str) -> None:
+        """
+        Posts a single CREDIT ledger entry for a holiday refund.
+
+        Parameters:
+            employee_id (int): The employee receiving the credit.
+            leave_type_id (int): The leave type being credited.
+            amount (float): Days to credit back.
+            calendar_event_id (int): The calendar_events.id used as source_id.
+            holiday_date (str): The holiday date (YYYY-MM-DD) used as transaction_date.
+            leave_type_code (str): The leave code for the remarks string.
+        """
+        result = query_insert(  # insert CREDIT entry for this holiday refund
+            """INSERT INTO leave_credit_transactions
+                   (transaction_number, employee_id, leave_type_id, transaction_type,
+                    amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+               VALUES (%s, %s, %s, 'CREDIT', %s, 'HOLIDAY_REFUND', %s, %s, 0, %s)""",
+            [
+                LeaveApplication._generate_transaction_number(),  # unique transaction number
+                employee_id,          # employee being credited
+                leave_type_id,        # leave type being credited
+                amount,               # days refunded
+                calendar_event_id,    # source: the holiday calendar event
+                holiday_date,         # transaction date = the holiday date
+                f"Holiday refund — {leave_type_code} leave on {holiday_date}",  # audit remarks
+            ]
+        )
+        if result.get("statusCode") != 200:  # raise so the caller can surface the error
+            raise RuntimeError(f"holiday credit insert failed: {result.get('message')}")
+
+    # --------------------------
     # Check employee balance
     # --------------------------
 
@@ -559,6 +877,20 @@ class LeaveApplication(BaseModel):
         if balance_type == "SELF":  # check the employee's own balance for this leave type
             if code == "CTO":  # CTO uses per-credit balance tracking instead of the aggregate cache
                 return LeaveApplication._check_cto_balance(employee_id, total_days)  # delegate to CTO-specific check
+
+            if code == "SL":  # SL uses VSC credits first (old then new) before falling back to regular SL balance
+                old_row = fetch_query(  # sum remaining old VSC credits for this employee
+                    "SELECT COALESCE(SUM(remaining_balance), 0.0) AS total FROM vsc_old_credit_balances WHERE employee_id = %s AND remaining_balance > 0",
+                    [employee_id]
+                )
+                new_row = fetch_query(  # sum remaining new VSC credits for this employee
+                    "SELECT COALESCE(SUM(remaining_balance), 0.0) AS total FROM vsc_new_credit_balances WHERE employee_id = %s AND remaining_balance > 0",
+                    [employee_id]
+                )
+                total_vsc = float(old_row[0]["total"]) + float(new_row[0]["total"])  # combined VSC available
+
+                if total_vsc >= total_days:  # VSC can fully cover this SL leave — no regular SL needed
+                    return None  # pass balance check; _deduct_vsc will handle the actual deduction
 
             available = LeaveApplication._get_balance(employee_id, code)  # fetch own balance for non-CTO types
 
@@ -599,6 +931,25 @@ class LeaveApplication(BaseModel):
                     "statusCode": 400,
                     "message": f"Insufficient balance for {code} application. {code} is charged against VL — both {code} entitlement and VL balance must be sufficient.",
                     "insufficient_balances": errors,
+                }
+
+        elif balance_type == "CHARGED_TO_VSC":  # PR case: charged against new VSC credits only
+            new_row = fetch_query(  # sum remaining new VSC credits for this employee
+                "SELECT COALESCE(SUM(remaining_balance), 0.0) AS total FROM vsc_new_credit_balances WHERE employee_id = %s AND remaining_balance > 0",
+                [employee_id]
+            )
+            new_available = float(new_row[0]["total"]) if new_row else 0.0  # available new VSC days
+
+            if new_available < total_days:  # new VSC credits are not enough to fund this PR leave
+                return {  # return structured insufficiency error
+                    "statusCode": 400,
+                    "message": f"Insufficient new VSC balance for {code} application. New VSC credits must be sufficient.",
+                    "insufficient_balances": [{
+                        "leave_type_checked": "VSC (new)",
+                        "required_days": total_days,
+                        "available_days": new_available,
+                        "shortfall_days": round(total_days - new_available, 2),
+                    }],
                 }
 
         return None  # all checks passed
@@ -922,22 +1273,58 @@ class LeaveApplication(BaseModel):
 
             enriched = LeaveApplication._enrich_with_dates(rows or [])  # attach dates and derived fields
 
+            # Query total refunded days per application from leave_refunded_dates
+            all_app_ids = [app["id"] for app in enriched]  # collect all app IDs for this year
+            refunded_per_app = {}  # app_id -> total holiday-refunded days
+            if all_app_ids:  # only query if there are applications
+                app_placeholders = ", ".join(["%s"] * len(all_app_ids))  # build IN clause
+                refund_rows = fetch_query(  # sum refunded amounts grouped by application
+                    f"""SELECT leave_application_id, SUM(amount_refunded) AS total_refunded
+                        FROM leave_refunded_dates
+                        WHERE leave_application_id IN ({app_placeholders})
+                        GROUP BY leave_application_id""",
+                    all_app_ids
+                )
+                for r in (refund_rows or []):  # build lookup dict from the result
+                    refunded_per_app[r["leave_application_id"]] = float(r["total_refunded"])
+
+            for app in enriched:  # attach refunded_days and effective_days to each app
+                app["refunded_days"] = round(refunded_per_app.get(app["id"], 0.0), 4)  # total days credited back by holiday refunds
+                app["effective_days"] = round(max(0.0, float(app["total_days"] or 0.0) - app["refunded_days"]), 4)  # net days actually charged after holiday refunds
+
             REVERSED_STATUSES = {"RETURNED", "DISAPPROVED"}  # statuses where the deduction was already restored
 
-            # Resolve VL and SL type IDs — VL is needed for CHARGED_TO_VL (FL) apps and both are always shown on the leave card
+            # Resolve VL, SL, and VSC type IDs — VL/SL are always shown; VSC is needed for CHARGED_TO_VSC (PR) apps
             vl_type = fetch_query("SELECT id FROM leave_types WHERE code = 'VL'", [])  # look up VL type
             vl_leave_type_id = vl_type[0]["id"] if vl_type else None  # store VL id or None if not found
             sl_type = fetch_query("SELECT id FROM leave_types WHERE code = 'SL'", [])  # look up SL type
             sl_leave_type_id = sl_type[0]["id"] if sl_type else None  # store SL id or None if not found
+            vsc_type = fetch_query("SELECT id FROM leave_types WHERE code = 'VSC'", [])  # look up VSC type
+            vsc_leave_type_id = vsc_type[0]["id"] if vsc_type else None  # store VSC id or None if not found
+
+            # Determine which SL apps used VSC credits (those deduct from VSC, not SL balance)
+            sl_app_ids = [app["id"] for app in enriched if app["leave_type_code"] == "SL"]  # collect SL app IDs
+            vsc_funded_sl = set()  # set of SL app IDs that deducted from VSC
+            if sl_app_ids:  # only query if there are SL apps this year
+                sl_placeholders = ", ".join(["%s"] * len(sl_app_ids))  # build IN clause
+                vsc_log_rows = fetch_query(  # check which SL apps have a vsc_deduction_log entry
+                    f"SELECT DISTINCT leave_application_id FROM vsc_deduction_log WHERE leave_application_id IN ({sl_placeholders})",
+                    sl_app_ids
+                )
+                vsc_funded_sl = {row["leave_application_id"] for row in (vsc_log_rows or [])}  # IDs that used VSC
 
             # Map each application to its effective leave_type_id for balance tracking
-            # SELF → own leave_type_id | CHARGED_TO_VL → VL id | NONE → None (no balance)
+            # SELF(CTO/SL-via-VSC)→ VSC/CTO id | SELF(SL/VL/etc.) → own id | CHARGED_TO_VL → VL | CHARGED_TO_VSC → VSC | NONE → None
             effective_type_map = {}  # app_id -> effective leave_type_id or None
             for app in enriched:  # iterate to build the map
                 if app["balance_type"] == "NONE":  # no balance deducted for this leave type
                     effective_type_map[app["id"]] = None  # skip balance tracking
                 elif app["balance_type"] == "CHARGED_TO_VL":  # FL — VL is the actual balance affected
                     effective_type_map[app["id"]] = vl_leave_type_id  # track VL running balance
+                elif app["balance_type"] == "CHARGED_TO_VSC":  # PR — VSC is the actual balance affected
+                    effective_type_map[app["id"]] = vsc_leave_type_id  # track VSC running balance
+                elif app["leave_type_code"] == "SL" and app["id"] in vsc_funded_sl:  # SL funded by VSC — VSC balance changes, not SL
+                    effective_type_map[app["id"]] = vsc_leave_type_id  # track VSC running balance
                 else:  # SELF — leave type's own balance is affected
                     effective_type_map[app["id"]] = app["leave_type_id"]  # track own balance
 
@@ -962,21 +1349,29 @@ class LeaveApplication(BaseModel):
             active_sums = {lt_id: 0.0 for lt_id in unique_eff_types}  # initialise to zero per type
             for app in enriched:  # accumulate active deductions for each effective type
                 eff_type = effective_type_map[app["id"]]  # get this app's effective type
-                if eff_type is None:  # NONE type — no balance impact
-                    continue  # skip
+                if eff_type is None:  # NONE type — check for MNT which splits across VL and SL
+                    if app.get("leave_type_code") == "MNT" and app["status"] not in REVERSED_STATUSES:  # MNT deducts from VL and SL separately
+                        mnt_vl = float(app.get("mnt_vl_days") or 0)  # VL portion of this monetization
+                        mnt_sl = float(app.get("mnt_sl_days") or 0)  # SL portion of this monetization
+                        if vl_leave_type_id and mnt_vl > 0:  # add VL days to VL active sum
+                            active_sums[vl_leave_type_id] = active_sums.get(vl_leave_type_id, 0.0) + mnt_vl
+                        if sl_leave_type_id and mnt_sl > 0:  # add SL days to SL active sum
+                            active_sums[sl_leave_type_id] = active_sums.get(sl_leave_type_id, 0.0) + mnt_sl
+                    continue  # no single effective type balance to track
                 if app["status"] not in REVERSED_STATUSES:  # only active apps reduced the balance
-                    active_sums[eff_type] += float(app["total_days"] or 0.0)  # add to running sum
+                    active_sums[eff_type] += app["effective_days"]  # use net days after holiday refunds
 
             # Fetch non-leave-app credits (monthly, manual, system) for this year per effective type
             # These must be interleaved with apps so credits only count from their transaction date onward
             year_credits_by_type = {}  # lt_id -> list of {amount, date} in chronological order
             for lt_id in unique_eff_types:  # one query per unique effective type
-                credit_rows = fetch_query(  # exclude LEAVE_APPLICATION rows (those are debits/reversals)
+                credit_rows = fetch_query(  # only CREDIT rows; exclude HOLIDAY_REFUND (baked into effective_days) and MONETIZATION DEBITs
                     """SELECT amount, transaction_date
                        FROM leave_credit_transactions
                        WHERE employee_id = %s AND leave_type_id = %s
                          AND YEAR(transaction_date) = %s
-                         AND source_type != 'LEAVE_APPLICATION'
+                         AND transaction_type = 'CREDIT'
+                         AND source_type NOT IN ('LEAVE_APPLICATION', 'HOLIDAY_REFUND')
                        ORDER BY transaction_date ASC, id ASC""",
                     [employee_id, lt_id, year]
                 )
@@ -1015,13 +1410,13 @@ class LeaveApplication(BaseModel):
 
             for app in enriched:  # add ALL leave-application events including NONE-type — needed for VL/SL snapshot
                 eff_type = effective_type_map[app["id"]]  # effective type for balance tracking (None for NONE types)
-                sort_date = str(app["start_date"]) if app["start_date"] else str(app["date_filed"])  # sort by leave period start
+                sort_date = str(app["date_filed"])  # sort by filing date to match display and leave card recording order
                 timeline.append({
-                    "lt_id": eff_type,      # effective leave type this app deducts from (None = no deduction)
-                    "date": sort_date,      # chronological position in the leave card
-                    "is_credit": False,     # flag: this event may reduce the running balance
-                    "amount": float(app["total_days"] or 0.0),  # days to deduct (if active)
-                    "app": app,             # reference to the application dict for updating balance_after
+                    "lt_id": eff_type,              # effective leave type this app deducts from (None = no deduction)
+                    "date": sort_date,              # chronological position in the leave card
+                    "is_credit": False,             # flag: this event may reduce the running balance
+                    "amount": app["effective_days"],  # net days after holiday refunds (0 if fully refunded)
+                    "app": app,                     # reference to the application dict for updating balance_after
                 })
 
             # Sort chronologically; credits land BEFORE apps on the same date
@@ -1036,9 +1431,16 @@ class LeaveApplication(BaseModel):
                 else:  # leave-app event: optionally deduct from running balance
                     app = event["app"]  # the application being processed
                     total_days = event["amount"]  # days requested
-                    if lt_id is None:  # NONE balance type: no balance change, but still needs VL/SL snapshot
-                        app["deduction"] = -total_days  # show days taken even though no balance is deducted
-                        app["balance_after"] = None  # no balance column for this leave type
+                    if lt_id is None:  # NONE balance type — MNT splits deduction across VL and SL
+                        if app.get("leave_type_code") == "MNT" and app["status"] not in REVERSED_STATUSES:  # active MNT: apply VL/SL deductions now
+                            mnt_vl = float(app.get("mnt_vl_days") or 0)  # VL portion
+                            mnt_sl = float(app.get("mnt_sl_days") or 0)  # SL portion
+                            if vl_leave_type_id and mnt_vl > 0:  # decrement VL running balance
+                                running_balances[vl_leave_type_id] -= mnt_vl
+                            if sl_leave_type_id and mnt_sl > 0:  # decrement SL running balance
+                                running_balances[sl_leave_type_id] -= mnt_sl
+                        app["deduction"] = -total_days if app["status"] not in REVERSED_STATUSES else 0.0  # negative days or 0 if reversed
+                        app["balance_after"] = None  # no single balance column for MNT
                     elif app["status"] in REVERSED_STATUSES:  # reversed: balance already restored, no deduction
                         app["deduction"] = 0.0  # zero deduction shown on the leave card
                         app["balance_after"] = round(running_balances[lt_id], 4)  # balance unchanged
@@ -1055,7 +1457,7 @@ class LeaveApplication(BaseModel):
                 "employee": employee[0],  # basic employee info for context
                 "year": year,             # the year filter applied
                 "count": len(enriched),   # total applications returned
-                "data": enriched,         # applications in ASC order with deduction and balance_after
+                "data": enriched,         # applications in date_filed ASC order
             }
 
         except Exception as e:  # catch unexpected errors

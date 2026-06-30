@@ -15,3 +15,22 @@ def get_all_leave_types():
 
     except Exception as e:  # catch unexpected errors
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
+
+
+def get_teaching_leave_types(employee_id: int):
+    """
+    Handles GET /leave-types/teaching/<employee_id> — retrieves all leave types
+    available for teaching staff, excluding SL (Sick Leave) and PR (Personal Reason).
+
+    Parameters:
+        employee_id (int): The employee's primary key from the URL path.
+
+    Returns:
+        JSON response with filtered leave types and HTTP 200, or an error response.
+    """
+    try:
+        result = LeaveType.get_teaching(employee_id)  # delegate to the LeaveType model
+        return jsonify(result), result["statusCode"]  # return result with its own status code
+
+    except Exception as e:  # catch unexpected errors
+        return jsonify({"message": str(e)}), 500  # return 500 with error detail

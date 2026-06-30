@@ -348,7 +348,7 @@ Create a new employee. `leave_card_number` is auto-generated if not provided.
 }
 ```
 
-> `division`, `original_appointment`, `latest_appointment`, `position`, `salary`, `contact_number`: optional
+> `division`, `original_appointment`, `latest_appointment`, `position`, `salary`, `contact_number`, `notes`: optional
 > `is_active`: optional, defaults to `true`; set to `false` to soft-delete
 > `employee_type`: `TEACHING` | `NON_TEACHING`
 > `employment_status`: `PERMANENT` | `TEMPORARY` | `CASUAL` | `CONTRACT_OF_SERVICE`
@@ -482,11 +482,12 @@ Update an existing employee. Only include fields to change.
   "position": "Teacher III",
   "salary": 35000.0,
   "contact_number": "09171234567",
+  "notes": "Returnee from leave of absence. Reinstated June 2026.",
   "is_active": true
 }
 ```
 
-> All fields are optional. Only include fields you want to change.
+> All fields are optional. Only include fields you want to change. `notes` is free-text and can be set to `null` to clear it.
 
 **Response** `200`
 
@@ -1924,6 +1925,181 @@ Paginated search with optional filters. All filters are optional and combinable.
   "message": "type must be CTO or VSC"
 }
 ```
+
+---
+
+## Leave Monetizations
+
+Monetization converts unused VL and/or SL days into monetary value. Records are stored in `leave_applications` with `leave_type = MNT` — **not a separate table**. Application numbers use the `MN-XXXXXXXX` format. VL and SL deductions are posted as separate DEBIT ledger entries immediately on submission.
+
+> **Field name mapping:** the request uses `vl_days` / `sl_days` / `remarks`; the response returns `mnt_vl_days` / `mnt_sl_days` / `reason`.
+
+---
+
+### POST `/leave-monetizations`
+
+Submit a new leave monetization. Validates VL/SL balance and deducts immediately.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Body**
+
+```json
+{
+  "employee_id": 1,
+  "vl_days": 10,
+  "sl_days": 5,
+  "date_filed": "2026-06-30",
+  "remarks": "Terminal leave monetization"
+}
+```
+
+| Field         | Type   | Required    | Description                                  |
+| ------------- | ------ | ----------- | -------------------------------------------- |
+| `employee_id` | int    | Yes         |                                              |
+| `date_filed`  | string | Yes         | YYYY-MM-DD                                   |
+| `vl_days`     | float  | Conditional | At least one of `vl_days` / `sl_days` must be > 0 |
+| `sl_days`     | float  | Conditional | At least one of `vl_days` / `sl_days` must be > 0 |
+| `remarks`     | string | No          | Stored in the `reason` field on the record   |
+
+**Response** `201`
+
+```json
+{
+  "statusCode": 201,
+  "message": "Leave monetization submitted successfully",
+  "data": {
+    "id": 5,
+    "application_number": "MN-A1B2C3D4",
+    "leave_type_code": "MNT",
+    "leave_type_name": "Monetization",
+    "employee_id": 1,
+    "first_name": "Juan",
+    "last_name": "Dela Cruz",
+    "employee_number": "EMP-2024-0001",
+    "date_filed": "2026-06-30",
+    "reason": "Terminal leave monetization",
+    "mnt_vl_days": 10.0,
+    "mnt_sl_days": 5.0,
+    "status": "FOR HRMO ACTION",
+    "start_date": null,
+    "end_date": null,
+    "leave_dates": []
+  }
+}
+```
+
+**Insufficient balance** `400`
+
+```json
+{
+  "statusCode": 400,
+  "message": "Insufficient VL balance. Available: 8.0, Requested: 10.0"
+}
+```
+
+---
+
+### GET `/leave-monetizations`
+
+Returns a paginated list of all monetizations across all employees, ordered by date filed descending.
+
+**Query Parameters**
+
+| Parameter | Type | Default | Description      |
+| --------- | ---- | ------- | ---------------- |
+| `page`    | int  | `1`     | Page number      |
+| `limit`   | int  | `10`    | Records per page |
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "page": 1,
+  "limit": 10,
+  "total": 1,
+  "pages": 1,
+  "data": [ "...same shape as submit data" ]
+}
+```
+
+---
+
+### GET `/leave-monetizations/<id>`
+
+Returns a single monetization record by its `leave_applications.id`.
+
+**Response** `200` — same shape as submit response `data`.
+
+**Not found** `404`
+
+```json
+{ "statusCode": 404, "message": "Leave monetization not found" }
+```
+
+---
+
+### GET `/leave-monetizations/employee/<employee_id>`
+
+Returns all monetizations for a specific employee, ordered by date filed descending.
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "employee": {
+    "id": 1,
+    "first_name": "Juan",
+    "last_name": "Dela Cruz",
+    "employee_number": "EMP-2024-0001"
+  },
+  "count": 1,
+  "data": [ "...same shape as submit data" ]
+}
+```
+
+---
+
+### DELETE `/leave-monetizations/<id>`
+
+Soft-deletes the `leave_applications` record and reverses VL/SL deductions unless status is already `RETURNED` or `DISAPPROVED`.
+
+**Headers:** `Authorization: Bearer <token>`
+
+| Status at deletion | Balance action                              |
+| ------------------ | ------------------------------------------- |
+| `FOR HRMO ACTION`  | VL/SL credits posted, balance restored      |
+| `FOR APPROVAL`     | VL/SL credits posted, balance restored      |
+| `APPROVED`         | VL/SL credits posted, balance restored      |
+| `RETURNED`         | No reversal — balance already restored      |
+| `DISAPPROVED`      | No reversal — balance already restored      |
+
+**Response** `200`
+
+```json
+{ "statusCode": 200, "message": "Leave monetization deleted successfully" }
+```
+
+---
+
+### MNT rows in `GET /leave-applications/employee/<id>/year/<year>`
+
+Monetization records appear in the running balance alongside regular leave applications. MNT-specific fields:
+
+| Field              | Value                                               |
+| ------------------ | --------------------------------------------------- |
+| `leave_type_code`  | `MNT`                                               |
+| `start_date`       | `null`                                              |
+| `end_date`         | `null`                                              |
+| `leave_dates`      | `[]`                                                |
+| `mnt_vl_days`      | VL days deducted                                    |
+| `mnt_sl_days`      | SL days deducted                                    |
+| `deduction`        | `-(mnt_vl_days + mnt_sl_days)`, or `0` if reversed |
+| `balance_after`    | `null` (no single balance column for MNT)           |
+| `vl_balance_after` | VL balance after this row's deduction               |
+| `sl_balance_after` | SL balance after this row's deduction               |
 
 ---
 

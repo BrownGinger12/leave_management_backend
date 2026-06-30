@@ -19,10 +19,10 @@ These are the recent changes to the Leave Applications module.
 Dates are stored individually in `leave_application_dates`. `start_date`, `end_date`, and `total_days` on the response are **derived**, not stored on the header.
 
 | `duration_type` | `half_day_period` | Days counted |
-|---|---|---|
-| `FULL_DAY` | `null` | 1.0 |
-| `HALF_DAY` | `AM` | 0.5 |
-| `HALF_DAY` | `PM` | 0.5 |
+| --------------- | ----------------- | ------------ |
+| `FULL_DAY`      | `null`            | 1.0          |
+| `HALF_DAY`      | `AM`              | 0.5          |
+| `HALF_DAY`      | `PM`              | 0.5          |
 
 ---
 
@@ -40,20 +40,35 @@ Dates are stored individually in `leave_application_dates`. `start_date`, `end_d
   "reason": "Personal matters",
   "other_leave_description": null,
   "dates": [
-    { "leave_date": "2026-07-21", "duration_type": "FULL_DAY", "half_day_period": null, "is_paid": true },
-    { "leave_date": "2026-07-22", "duration_type": "HALF_DAY", "half_day_period": "AM", "is_paid": true },
-    { "leave_date": "2026-07-23", "duration_type": "HALF_DAY", "half_day_period": "PM", "is_paid": false }
+    {
+      "leave_date": "2026-07-21",
+      "duration_type": "FULL_DAY",
+      "half_day_period": null,
+      "is_paid": true
+    },
+    {
+      "leave_date": "2026-07-22",
+      "duration_type": "HALF_DAY",
+      "half_day_period": "AM",
+      "is_paid": true
+    },
+    {
+      "leave_date": "2026-07-23",
+      "duration_type": "HALF_DAY",
+      "half_day_period": "PM",
+      "is_paid": false
+    }
   ]
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `dates` | array | Yes | At least one entry required |
-| `dates[].leave_date` | string | Yes | YYYY-MM-DD |
-| `dates[].duration_type` | string | Yes | `FULL_DAY` or `HALF_DAY` |
+| Field                     | Type   | Required    | Description                             |
+| ------------------------- | ------ | ----------- | --------------------------------------- |
+| `dates`                   | array  | Yes         | At least one entry required             |
+| `dates[].leave_date`      | string | Yes         | YYYY-MM-DD                              |
+| `dates[].duration_type`   | string | Yes         | `FULL_DAY` or `HALF_DAY`                |
 | `dates[].half_day_period` | string | Conditional | `AM` or `PM` — required when `HALF_DAY` |
-| `dates[].is_paid` | bool | No | Defaults to `true` |
+| `dates[].is_paid`         | bool   | No          | Defaults to `true`                      |
 
 **Response** `201`
 
@@ -69,9 +84,27 @@ Dates are stored individually in `leave_application_dates`. `start_date`, `end_d
     "end_date": "2026-07-23",
     "total_days": 2.0,
     "leave_dates": [
-      { "id": 1, "leave_date": "2026-07-21", "duration_type": "FULL_DAY", "half_day_period": null, "is_paid": 1 },
-      { "id": 2, "leave_date": "2026-07-22", "duration_type": "HALF_DAY", "half_day_period": "AM", "is_paid": 1 },
-      { "id": 3, "leave_date": "2026-07-23", "duration_type": "HALF_DAY", "half_day_period": "PM", "is_paid": 0 }
+      {
+        "id": 1,
+        "leave_date": "2026-07-21",
+        "duration_type": "FULL_DAY",
+        "half_day_period": null,
+        "is_paid": 1
+      },
+      {
+        "id": 2,
+        "leave_date": "2026-07-22",
+        "duration_type": "HALF_DAY",
+        "half_day_period": "AM",
+        "is_paid": 1
+      },
+      {
+        "id": 3,
+        "leave_date": "2026-07-23",
+        "duration_type": "HALF_DAY",
+        "half_day_period": "PM",
+        "is_paid": 0
+      }
     ]
   }
 }
@@ -112,8 +145,18 @@ Dates are stored individually in `leave_application_dates`. `start_date`, `end_d
 ```json
 {
   "dates": [
-    { "leave_date": "2026-07-21", "duration_type": "FULL_DAY", "half_day_period": null, "is_paid": true },
-    { "leave_date": "2026-07-22", "duration_type": "HALF_DAY", "half_day_period": "AM", "is_paid": true }
+    {
+      "leave_date": "2026-07-21",
+      "duration_type": "FULL_DAY",
+      "half_day_period": null,
+      "is_paid": true
+    },
+    {
+      "leave_date": "2026-07-22",
+      "duration_type": "HALF_DAY",
+      "half_day_period": "AM",
+      "is_paid": true
+    }
   ]
 }
 ```
@@ -132,8 +175,18 @@ Dates are stored individually in `leave_application_dates`. `start_date`, `end_d
     "end_date": "2026-07-22",
     "total_days": 1.5,
     "leave_dates": [
-      { "leave_date": "2026-07-21", "duration_type": "FULL_DAY", "half_day_period": null, "is_paid": 1 },
-      { "leave_date": "2026-07-22", "duration_type": "HALF_DAY", "half_day_period": "AM", "is_paid": 1 }
+      {
+        "leave_date": "2026-07-21",
+        "duration_type": "FULL_DAY",
+        "half_day_period": null,
+        "is_paid": 1
+      },
+      {
+        "leave_date": "2026-07-22",
+        "duration_type": "HALF_DAY",
+        "half_day_period": "AM",
+        "is_paid": 1
+      }
     ]
   }
 }
@@ -156,13 +209,13 @@ Dates are stored individually in `leave_application_dates`. `start_date`, `end_d
 
 **Balance reversal rules:**
 
-| Status at deletion | Balance action |
-|---|---|
-| `FOR HRMO ACTION` | Reversed |
-| `FOR APPROVAL` | Reversed |
-| `APPROVED` | Reversed |
-| `RETURNED` | No reversal (already restored by approval) |
-| `DISAPPROVED` | No reversal (already restored by approval) |
+| Status at deletion | Balance action                             |
+| ------------------ | ------------------------------------------ |
+| `FOR HRMO ACTION`  | Reversed                                   |
+| `FOR APPROVAL`     | Reversed                                   |
+| `APPROVED`         | Reversed                                   |
+| `RETURNED`         | No reversal (already restored by approval) |
+| `DISAPPROVED`      | No reversal (already restored by approval) |
 
 **Response** `200`
 
@@ -190,11 +243,11 @@ Dates are stored individually in `leave_application_dates`. `start_date`, `end_d
 
 **Running balance rules:**
 
-| Application status | `deduction` | Effect on `balance_after` |
-|---|---|---|
-| `FOR HRMO ACTION`, `FOR APPROVAL`, `APPROVED` | `-total_days` | Balance decreases |
-| `RETURNED`, `DISAPPROVED` | `0` | Balance unchanged — correction cascades forward |
-| Leave type is `NONE` | `-total_days` | `balance_after` is `null` (no balance tracked) |
+| Application status                            | `deduction`   | Effect on `balance_after`                       |
+| --------------------------------------------- | ------------- | ----------------------------------------------- |
+| `FOR HRMO ACTION`, `FOR APPROVAL`, `APPROVED` | `-total_days` | Balance decreases                               |
+| `RETURNED`, `DISAPPROVED`                     | `0`           | Balance unchanged — correction cascades forward |
+| Leave type is `NONE`                          | `-total_days` | `balance_after` is `null` (no balance tracked)  |
 
 Every application now includes `vl_balance_after` and `sl_balance_after` regardless of leave type — these are the running VL and SL balances **at that exact point in the leave card**. Monthly credits are interleaved by transaction date so the balances reflect only what was available at that time.
 
@@ -205,7 +258,12 @@ For `FL` (Forced Leave, `CHARGED_TO_VL`), `balance_after` tracks the **VL balanc
 ```json
 {
   "statusCode": 200,
-  "employee": { "id": 1, "first_name": "Juan", "last_name": "Dela Cruz", "employee_number": "EMP-2024-0001" },
+  "employee": {
+    "id": 1,
+    "first_name": "Juan",
+    "last_name": "Dela Cruz",
+    "employee_number": "EMP-2024-0001"
+  },
   "year": 2026,
   "count": 2,
   "data": [
@@ -245,6 +303,207 @@ For `FL` (Forced Leave, `CHARGED_TO_VL`), `balance_after` tracks the **VL balanc
 
 ---
 
+## Leave Monetizations
+
+Monetization converts unused VL and/or SL days into monetary value. Records are stored in `leave_applications` with `leave_type = MNT` — not a separate table. The `application_number` uses the `MN-XXXXXXXX` format. VL and SL deductions are posted immediately as separate DEBIT ledger entries on submission.
+
+---
+
+## POST `/leave-monetizations`
+
+Requires `Authorization` header.
+
+**Body**
+
+```json
+{
+  "employee_id": 1,
+  "vl_days": 10,
+  "sl_days": 5,
+  "date_filed": "2026-06-30",
+  "remarks": "Terminal leave monetization"
+}
+```
+
+| Field         | Type   | Required    | Description                                  |
+| ------------- | ------ | ----------- | -------------------------------------------- |
+| `employee_id` | int    | Yes         | FK to employees                              |
+| `date_filed`  | string | Yes         | YYYY-MM-DD                                   |
+| `vl_days`     | float  | Conditional | VL days to deduct — at least one must be > 0 |
+| `sl_days`     | float  | Conditional | SL days to deduct — at least one must be > 0 |
+| `remarks`     | string | No          | Stored in the `reason` field on the record   |
+
+**Response** `201`
+
+```json
+{
+  "statusCode": 201,
+  "message": "Leave monetization submitted successfully",
+  "data": {
+    "id": 5,
+    "application_number": "MN-A1B2C3D4",
+    "leave_type_code": "MNT",
+    "leave_type_name": "Monetization",
+    "employee_id": 1,
+    "first_name": "Juan",
+    "last_name": "Dela Cruz",
+    "employee_number": "EMP-2024-0001",
+    "date_filed": "2026-06-30",
+    "reason": "Terminal leave monetization",
+    "mnt_vl_days": 10.0,
+    "mnt_sl_days": 5.0,
+    "status": "FOR HRMO ACTION",
+    "start_date": null,
+    "end_date": null,
+    "leave_dates": []
+  }
+}
+```
+
+> **Field name mapping** — the request uses `vl_days`/`sl_days`/`remarks`; the response returns `mnt_vl_days`/`mnt_sl_days`/`reason`.
+
+**Insufficient balance** `400`
+
+```json
+{
+  "statusCode": 400,
+  "message": "Insufficient VL balance. Available: 8.0, Requested: 10.0"
+}
+```
+
+---
+
+## GET `/leave-monetizations`
+
+Returns a paginated list of all monetizations across all employees.
+
+**Query params**
+
+| Param   | Default | Description         |
+| ------- | ------- | ------------------- |
+| `page`  | `1`     | Page number         |
+| `limit` | `10`    | Records per page    |
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "page": 1,
+  "limit": 10,
+  "total": 1,
+  "pages": 1,
+  "data": [{ "...": "same shape as submit response data" }]
+}
+```
+
+---
+
+## GET `/leave-monetizations/<id>`
+
+Returns a single monetization record by its `leave_applications.id`.
+
+**Response** `200` — same shape as submit response `data`.
+
+**Not found** `404`
+
+```json
+{ "statusCode": 404, "message": "Leave monetization not found" }
+```
+
+---
+
+## GET `/leave-monetizations/employee/<employee_id>`
+
+Returns all monetizations for a specific employee.
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "employee": { "id": 1, "first_name": "Juan", "last_name": "Dela Cruz", "employee_number": "EMP-2024-0001" },
+  "count": 1,
+  "data": [{ "...": "same shape as submit response data" }]
+}
+```
+
+---
+
+## DELETE `/leave-monetizations/<id>`
+
+Requires `Authorization` header. Soft-deletes the `leave_applications` record and reverses VL/SL balance deductions unless the status is already `RETURNED` or `DISAPPROVED`.
+
+**Response** `200`
+
+```json
+{ "statusCode": 200, "message": "Leave monetization deleted successfully" }
+```
+
+---
+
+## MNT rows in the running balance (`GET /leave-applications/employee/<id>/year/<year>`)
+
+Monetization records appear in this endpoint alongside regular leave applications. MNT-specific behavior:
+
+| Field             | Value                                              |
+| ----------------- | -------------------------------------------------- |
+| `leave_type_code` | `MNT`                                              |
+| `start_date`      | `null`                                             |
+| `end_date`        | `null`                                             |
+| `leave_dates`     | `[]`                                               |
+| `mnt_vl_days`     | VL days deducted                                   |
+| `mnt_sl_days`     | SL days deducted                                   |
+| `deduction`       | `-(mnt_vl_days + mnt_sl_days)` or `0` if reversed |
+| `balance_after`   | `null` (no single balance column for MNT)          |
+| `vl_balance_after`| VL balance after this row's deduction              |
+| `sl_balance_after`| SL balance after this row's deduction              |
+
+The frontend should fall back to `date_filed` when `start_date` is `null`, and render `mnt_vl_days` + `mnt_sl_days` as a breakdown instead of a single `total_days` figure.
+
+---
+
+## GET `/leave-types/teaching/<employee_id>`
+
+**New endpoint.** Returns all leave types available for teaching staff for a specific employee. Excludes `SL` (Sick Leave) and `PR` (Personal Reason) — both are funded through VSC credits and are handled through separate balance rules.
+
+**URL params**
+
+| Param         | Type | Description                |
+| ------------- | ---- | -------------------------- |
+| `employee_id` | int  | The employee's primary key |
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "employee_id": 1,
+  "count": 11,
+  "data": [
+    { "id": 9,  "code": "CTO",  "name": "Compensatory Time Off",   "balance_type": "SELF",           "is_active": 1 },
+    { "id": 4,  "code": "FL",   "name": "Forced Leave",            "balance_type": "CHARGED_TO_VL",  "is_active": 1 },
+    { "id": 5,  "code": "ML",   "name": "Maternity Leave",         "balance_type": "NONE",           "is_active": 1 },
+    { "id": 11, "code": "OL",   "name": "Others",                  "balance_type": "NONE",           "is_active": 1 },
+    { "id": 6,  "code": "PL",   "name": "Paternity Leave",         "balance_type": "NONE",           "is_active": 1 },
+    { "id": 7,  "code": "SLB",  "name": "Solo Parent Leave",       "balance_type": "NONE",           "is_active": 1 },
+    { "id": 3,  "code": "SPL",  "name": "Special Privilege Leave", "balance_type": "SELF",           "is_active": 1 },
+    { "id": 10, "code": "VSC",  "name": "Vacation Service Credits","balance_type": "SELF",           "is_active": 1 },
+    { "id": 8,  "code": "VAWC", "name": "VAWC Leave",              "balance_type": "NONE",           "is_active": 1 },
+    { "id": 1,  "code": "VL",   "name": "Vacation Leave",          "balance_type": "SELF",           "is_active": 1 },
+    { "id": 12, "code": "WL",   "name": "Wellness Leave",          "balance_type": "SELF",           "is_active": 1 }
+  ]
+}
+```
+
+**Employee not found** `404`
+
+```json
+{ "statusCode": 404, "message": "Employee not found" }
+```
+
+---
+
 ## Database Changes
 
 Three new columns added to `leave_applications`:
@@ -254,3 +513,19 @@ is_deleted  TINYINT(1) NOT NULL DEFAULT 0,  -- 1 = soft-deleted
 deleted_at  DATETIME DEFAULT NULL,            -- timestamp of deletion
 deleted_by  INT DEFAULT NULL                  -- FK to users.id
 ```
+
+New table `leave_refunded_dates` — one row per credit posted when a holiday refund fires:
+
+```sql
+CREATE TABLE leave_refunded_dates (
+    id                      INT AUTO_INCREMENT PRIMARY KEY,
+    leave_application_id    INT NOT NULL,       -- FK → leave_applications.id
+    calendar_event_id       INT NOT NULL,       -- FK → calendar_events.id (the holiday)
+    holiday_date            DATE NOT NULL,      -- the holiday date that was refunded
+    amount_refunded         DECIMAL(8,2),       -- days credited back
+    credited_leave_type_id  INT NOT NULL,       -- FK → leave_types.id (type that received the credit)
+    refunded_at             TIMESTAMP           -- when the refund was recorded
+);
+```
+
+> FL (`CHARGED_TO_VL`) produces two rows per application per holiday — one for FL and one for VL, since both balances are credited.

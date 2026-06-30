@@ -7,10 +7,13 @@
       "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "variable": [
-      { "key": "base_url", "value": "http://localhost:5000", "type": "string" }
+      {
+        "key": "base_url",
+        "value": "http://localhost:5000",
+        "type": "string"
+      }
     ],
     "item": [
-
       {
         "name": "Schools",
         "item": [
@@ -21,8 +24,12 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/schools",
-                "host": ["{{base_url}}"],
-                "path": ["schools"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "schools"
+                ]
               },
               "description": "Returns all schools in the division ordered alphabetically by name."
             },
@@ -30,7 +37,6 @@
           }
         ]
       },
-
       {
         "name": "Calendar Events",
         "item": [
@@ -38,12 +44,26 @@
             "name": "Get Events By Year",
             "request": {
               "method": "GET",
-              "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
               "url": {
                 "raw": "{{base_url}}/calendar-events?year=2026",
-                "host": ["{{base_url}}"],
-                "path": ["calendar-events"],
-                "query": [{ "key": "year", "value": "2026" }]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "calendar-events"
+                ],
+                "query": [
+                  {
+                    "key": "year",
+                    "value": "2026"
+                  }
+                ]
               },
               "description": "Returns all calendar events for a given year. Defaults to current year if not specified."
             },
@@ -53,11 +73,21 @@
             "name": "Get Events Current Month",
             "request": {
               "method": "GET",
-              "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
               "url": {
                 "raw": "{{base_url}}/calendar-events/current-month",
-                "host": ["{{base_url}}"],
-                "path": ["calendar-events", "current-month"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "calendar-events",
+                  "current-month"
+                ]
               },
               "description": "Returns all calendar events for the current calendar month."
             },
@@ -68,18 +98,32 @@
             "request": {
               "method": "POST",
               "header": [
-                { "key": "Authorization", "value": "Bearer {{token}}" },
-                { "key": "Content-Type", "value": "application/json" }
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
               ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"date\": \"2026-12-25\",\n  \"name\": \"Christmas Day\",\n  \"blocks_leave\": 1,\n  \"period\": \"FULL\"\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/calendar-events",
-                "host": ["{{base_url}}"],
-                "path": ["calendar-events"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "calendar-events"
+                ]
               },
               "description": "Creates a new holiday. Admin only. blocks_leave=1 means leave cannot be applied on this date."
             },
@@ -90,18 +134,33 @@
             "request": {
               "method": "PUT",
               "header": [
-                { "key": "Authorization", "value": "Bearer {{token}}" },
-                { "key": "Content-Type", "value": "application/json" }
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
               ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"name\": \"Christmas Day\",\n  \"blocks_leave\": 1,\n  \"period\": \"AM\"\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/calendar-events/1",
-                "host": ["{{base_url}}"],
-                "path": ["calendar-events", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "calendar-events",
+                  "1"
+                ]
               },
               "description": "Updates a calendar event by ID. Admin only. All body fields are optional."
             },
@@ -111,11 +170,21 @@
             "name": "Delete Calendar Event",
             "request": {
               "method": "DELETE",
-              "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
               "url": {
                 "raw": "{{base_url}}/calendar-events/1",
-                "host": ["{{base_url}}"],
-                "path": ["calendar-events", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "calendar-events",
+                  "1"
+                ]
               },
               "description": "Deletes a calendar event by ID. Admin only."
             },
@@ -123,7 +192,6 @@
           }
         ]
       },
-
       {
         "name": "Positions",
         "item": [
@@ -134,8 +202,12 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/positions",
-                "host": ["{{base_url}}"],
-                "path": ["positions"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "positions"
+                ]
               },
               "description": "Returns all positions (teaching and non-teaching) ordered by type then name alphabetically."
             },
@@ -148,9 +220,18 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/positions?type=TEACHING",
-                "host": ["{{base_url}}"],
-                "path": ["positions"],
-                "query": [{ "key": "type", "value": "TEACHING" }]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "positions"
+                ],
+                "query": [
+                  {
+                    "key": "type",
+                    "value": "TEACHING"
+                  }
+                ]
               },
               "description": "Returns only teaching positions."
             },
@@ -163,9 +244,18 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/positions?type=NON_TEACHING",
-                "host": ["{{base_url}}"],
-                "path": ["positions"],
-                "query": [{ "key": "type", "value": "NON_TEACHING" }]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "positions"
+                ],
+                "query": [
+                  {
+                    "key": "type",
+                    "value": "NON_TEACHING"
+                  }
+                ]
               },
               "description": "Returns only non-teaching positions."
             },
@@ -173,7 +263,6 @@
           }
         ]
       },
-
       {
         "name": "Authentication",
         "item": [
@@ -181,16 +270,30 @@
             "name": "Login",
             "request": {
               "method": "POST",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin@12345\"\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/auth/login",
-                "host": ["{{base_url}}"],
-                "path": ["auth", "login"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "auth",
+                  "login"
+                ]
               },
               "description": "Authenticate with username and password. Returns a JWT token valid for 8 hours."
             },
@@ -200,11 +303,21 @@
             "name": "Get Me",
             "request": {
               "method": "GET",
-              "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
               "url": {
                 "raw": "{{base_url}}/auth/me",
-                "host": ["{{base_url}}"],
-                "path": ["auth", "me"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "auth",
+                  "me"
+                ]
               },
               "description": "Returns the profile of the currently authenticated user from the JWT token."
             },
@@ -212,7 +325,6 @@
           }
         ]
       },
-
       {
         "name": "Users (ADMIN only)",
         "item": [
@@ -221,18 +333,32 @@
             "request": {
               "method": "POST",
               "header": [
-                { "key": "Content-Type", "value": "application/json" },
-                { "key": "Authorization", "value": "Bearer {{token}}" }
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
               ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"employee_id\": 1,\n  \"username\": \"jdelacruz\",\n  \"password\": \"SecurePassword123\",\n  \"role\": \"TEACHING_PERSONNEL\"\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/users",
-                "host": ["{{base_url}}"],
-                "path": ["users"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "users"
+                ]
               },
               "description": "Creates a new user account linked to an existing employee. role: ADMIN | DIVISION_PERSONNEL | TEACHING_PERSONNEL. One account per employee. Requires ADMIN token."
             },
@@ -242,14 +368,29 @@
             "name": "Get All Users",
             "request": {
               "method": "GET",
-              "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
               "url": {
                 "raw": "{{base_url}}/users?page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["users"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "users"
+                ],
                 "query": [
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Returns a paginated list of all user accounts. Requires ADMIN token."
@@ -260,11 +401,21 @@
             "name": "Get User by ID",
             "request": {
               "method": "GET",
-              "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
               "url": {
                 "raw": "{{base_url}}/users/1",
-                "host": ["{{base_url}}"],
-                "path": ["users", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "users",
+                  "1"
+                ]
               },
               "description": "Returns a single user account by ID. Requires ADMIN token."
             },
@@ -272,7 +423,6 @@
           }
         ]
       },
-
       {
         "name": "Employees",
         "item": [
@@ -281,16 +431,29 @@
             "id": "41f89d8f-30ee-47ba-aaa9-6cfdd8793553",
             "request": {
               "method": "POST",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"employee_number\": \"EMP-2024-0001\",\n  \"first_name\": \"Juan\",\n  \"last_name\": \"Dela Cruz\",\n  \"middle_name\": \"Santos\",\n  \"email\": \"juan.delacruz@deped.gov.ph\",\n  \"employee_type\": \"TEACHING\",\n  \"employment_status\": \"PERMANENT\",\n  \"school_id\": 1,\n  \"division\": \"Schools Division of Manila\",\n  \"original_appointment\": \"2015-06-01\",\n  \"latest_appointment\": \"2022-01-15\",\n  \"position\": \"Teacher III\",\n  \"salary\": 35000.00,\n  \"contact_number\": \"09171234567\",\n  \"is_active\": true,\n  \"leave_card_number\": \"\"\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/employees",
-                "host": ["{{base_url}}"],
-                "path": ["employees"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees"
+                ]
               },
               "description": "Creates a new employee. leave_card_number is auto-generated (LC-XXXXXXXX) if left empty."
             },
@@ -304,11 +467,21 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/employees?page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["employees"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees"
+                ],
                 "query": [
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               }
             },
@@ -322,8 +495,13 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/employees/1",
-                "host": ["{{base_url}}"],
-                "path": ["employees", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees",
+                  "1"
+                ]
               }
             },
             "response": []
@@ -336,8 +514,13 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/employees/count",
-                "host": ["{{base_url}}"],
-                "path": ["employees", "count"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees",
+                  "count"
+                ]
               }
             },
             "response": []
@@ -350,9 +533,19 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/employees/pages?limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["employees", "pages"],
-                "query": [{ "key": "limit", "value": "10" }]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees",
+                  "pages"
+                ],
+                "query": [
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
+                ]
               }
             },
             "response": []
@@ -365,12 +558,26 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/employees/search?query=juan&page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["employees", "search"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees",
+                  "search"
+                ],
                 "query": [
-                  { "key": "query", "value": "juan" },
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "query",
+                    "value": "juan"
+                  },
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Search by name, employee number, leave card number, or email."
@@ -382,16 +589,30 @@
             "id": "16d04f00-9903-4c70-bae2-95edddda4409",
             "request": {
               "method": "PUT",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"first_name\": \"Juan\",\n  \"last_name\": \"Dela Cruz\",\n  \"middle_name\": \"Santos\",\n  \"email\": \"juan.delacruz@deped.gov.ph\",\n  \"employee_type\": \"TEACHING\",\n  \"employment_status\": \"PERMANENT\",\n  \"school_id\": 1,\n  \"division\": \"Schools Division of Manila\",\n  \"original_appointment\": \"2015-06-01\",\n  \"latest_appointment\": \"2022-01-15\",\n  \"position\": \"Teacher III\",\n  \"salary\": 35000.00,\n  \"contact_number\": \"09171234567\",\n  \"is_active\": true\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/employees/1",
-                "host": ["{{base_url}}"],
-                "path": ["employees", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees",
+                  "1"
+                ]
               },
               "description": "Only include fields you want to change. All fields are optional."
             },
@@ -405,8 +626,13 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/employees/1",
-                "host": ["{{base_url}}"],
-                "path": ["employees", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees",
+                  "1"
+                ]
               }
             },
             "response": []
@@ -419,8 +645,14 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/employees/1/leave-balances",
-                "host": ["{{base_url}}"],
-                "path": ["employees", "1", "leave-balances"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees",
+                  "1",
+                  "leave-balances"
+                ]
               },
               "description": "Returns all leave balances for a specific employee joined with leave type details."
             },
@@ -433,12 +665,24 @@
               "header": [],
               "body": {
                 "mode": "formdata",
-                "formdata": [{ "key": "photo", "type": "file", "src": "" }]
+                "formdata": [
+                  {
+                    "key": "photo",
+                    "type": "file",
+                    "src": ""
+                  }
+                ]
               },
               "url": {
                 "raw": "{{base_url}}/employees/1/photo",
-                "host": ["{{base_url}}"],
-                "path": ["employees", "1", "photo"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "employees",
+                  "1",
+                  "photo"
+                ]
               },
               "description": "Upload a profile photo for an employee (multipart/form-data). Replaces any existing photo. Returns the updated employee with a signed, expiring photo URL (valid 10 minutes)."
             },
@@ -451,11 +695,23 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/uploads/employee_photos/<filename>?expires=<ts>&signature=<sig>",
-                "host": ["{{base_url}}"],
-                "path": ["uploads", "employee_photos", "<filename>"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "uploads",
+                  "employee_photos",
+                  "<filename>"
+                ],
                 "query": [
-                  { "key": "expires", "value": "<ts>" },
-                  { "key": "signature", "value": "<sig>" }
+                  {
+                    "key": "expires",
+                    "value": "<ts>"
+                  },
+                  {
+                    "key": "signature",
+                    "value": "<sig>"
+                  }
                 ]
               },
               "description": "Serves a private employee photo. Use the signed URL from data.photo — do not construct manually. Returns 403 if signature is invalid or expired."
@@ -464,7 +720,6 @@
           }
         ]
       },
-
       {
         "name": "Monthly Leave Credits",
         "item": [
@@ -472,16 +727,29 @@
             "name": "Credit Monthly VL or SL",
             "request": {
               "method": "POST",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"employee_id\": 1,\n  \"leave_type_id\": 1,\n  \"year\": 2026,\n  \"month\": 6,\n  \"amount\": 1.25,\n  \"transaction_date\": \"2026-06-30\",\n  \"remarks\": \"June 2026 monthly VL credit\"\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/monthly-leave-credits",
-                "host": ["{{base_url}}"],
-                "path": ["monthly-leave-credits"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "monthly-leave-credits"
+                ]
               },
               "description": "Credits one month of VL or SL to an employee. leave_type_id must be VL or SL. Returns 409 if already credited for that month/year. The UNIQUE constraint on (employee_id, leave_type_id, year, month) prevents double-crediting."
             },
@@ -494,8 +762,16 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/monthly-leave-credits/employee/1/year/2026",
-                "host": ["{{base_url}}"],
-                "path": ["monthly-leave-credits", "employee", "1", "year", "2026"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "monthly-leave-credits",
+                  "employee",
+                  "1",
+                  "year",
+                  "2026"
+                ]
               },
               "description": "Returns all monthly VL/SL credit records for a specific employee in the given year, ordered by month ascending. Each record includes the linked ledger transaction data (transaction_number, balance_snapshot_after, transaction_date, etc.)."
             },
@@ -503,7 +779,6 @@
           }
         ]
       },
-
       {
         "name": "Leave Credits",
         "item": [
@@ -512,16 +787,29 @@
             "id": "bb6621a3-2549-447e-8823-19243273daae",
             "request": {
               "method": "POST",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"employee_id\": 1,\n  \"leave_type_id\": 1,\n  \"amount\": 1.25,\n  \"transaction_date\": \"2026-06-18\",\n  \"remarks\": \"Monthly VL credit\"\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/leave-credits",
-                "host": ["{{base_url}}"],
-                "path": ["leave-credits"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-credits"
+                ]
               },
               "description": "Credits leave days to an employee balance for any active leave type. Posts CREDIT to ledger and updates cached balance."
             },
@@ -529,7 +817,6 @@
           }
         ]
       },
-
       {
         "name": "Leave Applications",
         "item": [
@@ -538,16 +825,29 @@
             "id": "958b3997-4359-4299-bc83-6a703f85060b",
             "request": {
               "method": "POST",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"employee_id\": 1,\n  \"leave_type_id\": 1,\n  \"date_filed\": \"2026-07-10\",\n  \"reason\": \"Personal matters\",\n  \"other_leave_description\": null,\n  \"dates\": [\n    { \"leave_date\": \"2026-07-21\", \"duration_type\": \"FULL_DAY\", \"half_day_period\": null, \"is_paid\": true },\n    { \"leave_date\": \"2026-07-22\", \"duration_type\": \"HALF_DAY\", \"half_day_period\": \"AM\", \"is_paid\": true }\n  ]\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/leave-applications",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications"
+                ]
               },
               "description": "Submits a leave application using a dates[] array instead of start_date/end_date. Each date entry has: leave_date (YYYY-MM-DD), duration_type (FULL_DAY or HALF_DAY), half_day_period (AM or PM, required when HALF_DAY), is_paid (default true). Created with status FOR HRMO ACTION. Balance is deducted immediately. Returns 400 if a date conflicts with a holiday or an existing leave. Balance type rules: SELF = own balance checked, CHARGED_TO_VL (FL) = VL balance checked and debited, NONE = no balance check."
             },
@@ -558,18 +858,33 @@
             "request": {
               "method": "PUT",
               "header": [
-                { "key": "Authorization", "value": "Bearer {{token}}" },
-                { "key": "Content-Type", "value": "application/json" }
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
               ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"dates\": [\n    { \"leave_date\": \"2026-07-21\", \"duration_type\": \"FULL_DAY\", \"half_day_period\": null, \"is_paid\": true },\n    { \"leave_date\": \"2026-07-22\", \"duration_type\": \"HALF_DAY\", \"half_day_period\": \"AM\", \"is_paid\": true }\n  ]\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/leave-applications/1",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "1"
+                ]
               },
               "description": "Replaces all leave dates on an existing application. Only allowed when status is FOR HRMO ACTION. Old balance debit is reversed and a new debit is posted for the updated total. Holidays, overlaps, and balance are re-validated before any writes. Requires Authorization header."
             },
@@ -580,12 +895,20 @@
             "request": {
               "method": "DELETE",
               "header": [
-                { "key": "Authorization", "value": "Bearer {{token}}" }
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
               ],
               "url": {
                 "raw": "{{base_url}}/leave-applications/1",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "1"
+                ]
               },
               "description": "Soft-deletes a leave application. The record stays in the database (is_deleted = 1) with deleted_at and deleted_by set. Excluded from all GET queries and overlap checks after deletion. Balance reversal rules: FOR HRMO ACTION / FOR APPROVAL / APPROVED = balance is restored; RETURNED / DISAPPROVED = no reversal (balance already restored by approval). Requires Authorization header."
             },
@@ -598,11 +921,22 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-applications/all?page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "all"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "all"
+                ],
                 "query": [
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Returns a paginated list of ALL leave applications across all employees and all leave types including CTO and VSC, ordered by date filed descending."
@@ -616,11 +950,21 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-applications?page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications"
+                ],
                 "query": [
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Returns a paginated list of all leave applications across all employees, ordered by date filed descending. CTO and VSC leave applications are EXCLUDED — use GET /leave-applications/all to include them, or GET /leave-applications/cto-vsc for CTO/VSC only."
@@ -634,11 +978,22 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-applications/cto-vsc?page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "cto-vsc"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "cto-vsc"
+                ],
                 "query": [
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Returns a paginated list of CTO and VSC leave applications only, ordered by date filed descending."
@@ -653,8 +1008,13 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-applications/1",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "1"
+                ]
               },
               "description": "Retrieves a single leave application by ID including employee name and leave type details."
             },
@@ -668,8 +1028,14 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-applications/employee/1",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "employee", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "employee",
+                  "1"
+                ]
               },
               "description": "Retrieves all leave applications for a specific employee, ordered by date filed descending. CTO and VSC are EXCLUDED — use GET /leave-applications/cto-vsc/employee/<id> for those."
             },
@@ -682,8 +1048,15 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-applications/cto-vsc/employee/1",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "cto-vsc", "employee", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "cto-vsc",
+                  "employee",
+                  "1"
+                ]
               },
               "description": "Retrieves all CTO and VSC leave applications for a specific employee, ordered by date filed descending."
             },
@@ -696,10 +1069,18 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-applications/employee/1/year/2026",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "employee", "1", "year", "2026"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "employee",
+                  "1",
+                  "year",
+                  "2026"
+                ]
               },
-              "description": "Returns all leave applications for a specific employee in the given calendar year, ordered ASC by start_date. Each application includes: deduction (negative = days consumed, 0 = reversed), balance_after (running balance for this application's own leave type), vl_balance_after (VL running balance at this row — always present), sl_balance_after (SL running balance at this row — always present). Monthly credits are interleaved by transaction_date so the balance at a May row only reflects credits posted on or before that date, not future months. RETURNED and DISAPPROVED apps show deduction=0 and do not reduce the running balance."
+              "description": "Returns all leave applications for a specific employee in the given calendar year, ordered ASC by start_date. Each application includes: deduction (negative = days consumed, 0 = reversed), balance_after (running balance for this application's own leave type), vl_balance_after (VL running balance at this row — always present), sl_balance_after (SL running balance at this row — always present). Monthly credits are interleaved by transaction_date so the balance at a May row only reflects credits posted on or before that date, not future months. RETURNED and DISAPPROVED apps show deduction=0 and do not reduce the running balance.\n\nMNT (monetization) rows are included in this list. They have: leave_type_code='MNT', start_date=null, end_date=null, leave_dates=[], balance_after=null (no single balance column), mnt_vl_days and mnt_sl_days showing how much was deducted from each type. The vl_balance_after and sl_balance_after columns still update correctly at MNT rows to reflect the VL/SL deductions. Also includes: refunded_days (days credited back from holiday refunds), effective_days (total_days minus refunded_days, the net days actually charged)."
             },
             "response": []
           },
@@ -710,8 +1091,14 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-applications/number/LA-A1B2C3D4",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "number", "LA-A1B2C3D4"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "number",
+                  "LA-A1B2C3D4"
+                ]
               },
               "description": "Returns a single leave application by its unique application number (e.g. LA-A1B2C3D4). No pagination. Returns 404 if not found."
             },
@@ -724,16 +1111,49 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-applications/search?year=2026&status=FOR APPROVAL&leave_type_code=VL&date_from=2026-01-01&date_to=2026-12-31&page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["leave-applications", "search"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-applications",
+                  "search"
+                ],
                 "query": [
-                  { "key": "year", "value": "2026", "description": "Filter by calendar year of date_filed" },
-                  { "key": "status", "value": "FOR APPROVAL", "description": "Filter by status: FOR HRMO ACTION | FOR APPROVAL | RETURNED | DISAPPROVED | APPROVED" },
-                  { "key": "leave_type_code", "value": "VL", "description": "Filter by leave type code (e.g. VL, SL, FL, CTO)" },
-                  { "key": "date_from", "value": "2026-01-01", "description": "Lower bound of date_filed range (YYYY-MM-DD)" },
-                  { "key": "date_to", "value": "2026-12-31", "description": "Upper bound of date_filed range (YYYY-MM-DD)" },
-                  { "key": "page", "value": "1", "description": "Page number (default 1)" },
-                  { "key": "limit", "value": "10", "description": "Records per page (default 10)" }
+                  {
+                    "key": "year",
+                    "value": "2026",
+                    "description": "Filter by calendar year of date_filed"
+                  },
+                  {
+                    "key": "status",
+                    "value": "FOR APPROVAL",
+                    "description": "Filter by status: FOR HRMO ACTION | FOR APPROVAL | RETURNED | DISAPPROVED | APPROVED"
+                  },
+                  {
+                    "key": "leave_type_code",
+                    "value": "VL",
+                    "description": "Filter by leave type code (e.g. VL, SL, FL, CTO)"
+                  },
+                  {
+                    "key": "date_from",
+                    "value": "2026-01-01",
+                    "description": "Lower bound of date_filed range (YYYY-MM-DD)"
+                  },
+                  {
+                    "key": "date_to",
+                    "value": "2026-12-31",
+                    "description": "Upper bound of date_filed range (YYYY-MM-DD)"
+                  },
+                  {
+                    "key": "page",
+                    "value": "1",
+                    "description": "Page number (default 1)"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10",
+                    "description": "Records per page (default 10)"
+                  }
                 ]
               },
               "description": "Paginated search with optional filters. All query params are optional and combinable. Returns count, total, page, limit, filters (echoes applied filters), and data. Returns 400 for invalid status value."
@@ -742,7 +1162,137 @@
           }
         ]
       },
-
+      {
+        "name": "Leave Monetizations",
+        "item": [
+          {
+            "name": "Submit Leave Monetization",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n  \"employee_id\": 1,\n  \"vl_days\": 10,\n  \"sl_days\": 5,\n  \"date_filed\": \"2026-06-30\",\n  \"remarks\": \"Terminal leave monetization\"\n}",
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
+              },
+              "url": {
+                "raw": "{{base_url}}/leave-monetizations",
+                "host": ["{{base_url}}"],
+                "path": ["leave-monetizations"]
+              },
+              "description": "Submits a new leave monetization. Records are stored in leave_applications with leave_type = MNT (not a separate table). At least one of vl_days or sl_days must be greater than 0. Validates VL/SL balance and posts separate DEBIT ledger entries immediately.\n\nRequest body fields:\n- employee_id: REQUIRED\n- date_filed: REQUIRED (YYYY-MM-DD)\n- vl_days: VL days to deduct (default 0)\n- sl_days: SL days to deduct (default 0)\n- remarks: optional notes (stored in the reason field)\n\nResponse field notes (differ from request field names):\n- application_number: unique identifier in MN-XXXXXXXX format\n- mnt_vl_days: VL days deducted (input was vl_days)\n- mnt_sl_days: SL days deducted (input was sl_days)\n- reason: notes text (input was remarks)\n- leave_type_code: 'MNT'\n- leave_type_name: 'Monetization'\n- start_date / end_date: always null (no leave dates)\n- leave_dates: always [] (no individual date entries)\n- status: FOR HRMO ACTION on creation"
+            },
+            "response": []
+          },
+          {
+            "name": "Get All Monetizations",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-monetizations?page=1&limit=10",
+                "host": ["{{base_url}}"],
+                "path": ["leave-monetizations"],
+                "query": [
+                  {
+                    "key": "page",
+                    "value": "1",
+                    "description": "Page number (default 1)"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10",
+                    "description": "Records per page (default 10)"
+                  }
+                ]
+              },
+              "description": "Returns a paginated list of all leave monetizations (leave_type = MNT) across all employees, ordered by date filed descending. Records come from leave_applications. Key response fields: application_number (MN-XXXXXXXX), mnt_vl_days, mnt_sl_days, reason (the remarks text), leave_type_code = 'MNT'."
+            },
+            "response": []
+          },
+          {
+            "name": "Get Monetization By ID",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-monetizations/1",
+                "host": ["{{base_url}}"],
+                "path": ["leave-monetizations", "1"]
+              },
+              "description": "Returns a single leave monetization by its leave_applications.id. Returns 404 if not found, soft-deleted, or not an MNT type application. Key response fields: application_number (MN-XXXXXXXX), mnt_vl_days, mnt_sl_days, reason."
+            },
+            "response": []
+          },
+          {
+            "name": "Get Monetizations By Employee",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-monetizations/employee/1",
+                "host": ["{{base_url}}"],
+                "path": ["leave-monetizations", "employee", "1"]
+              },
+              "description": "Returns all leave monetization records (leave_type = MNT) for a specific employee from leave_applications, ordered by date filed descending. Returns 404 if the employee does not exist."
+            },
+            "response": []
+          },
+          {
+            "name": "Delete Monetization",
+            "request": {
+              "method": "DELETE",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-monetizations/1",
+                "host": ["{{base_url}}"],
+                "path": ["leave-monetizations", "1"]
+              },
+              "description": "Soft-deletes a leave monetization record in leave_applications (is_deleted = 1). Reverses the VL and/or SL balance deductions by posting CREDIT ledger entries unless the status is already RETURNED or DISAPPROVED. Requires Authorization header."
+            },
+            "response": []
+          }
+        ]
+      },
       {
         "name": "Leave Approvals",
         "item": [
@@ -751,16 +1301,29 @@
             "id": "020b1d7f-86cb-4d77-b4e8-c12c21a4bbae",
             "request": {
               "method": "POST",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"leave_application_id\": 1,\n  \"approver_id\": 2,\n  \"level\": 1,\n  \"status\": \"APPROVED\",\n  \"remarks\": \"Approved as requested\"\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/leave-approvals",
-                "host": ["{{base_url}}"],
-                "path": ["leave-approvals"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-approvals"
+                ]
               },
               "description": "Processes an approval decision. Valid target statuses: FOR HRMO ACTION | FOR APPROVAL | APPROVED | RETURNED | DISAPPROVED. Transition rules: active→reversed (RETURNED or DISAPPROVED) posts a CREDIT reversal restoring the balance. reversed→active (any non-reversed status) re-posts a DEBIT deducting the balance again — returns 400 if insufficient balance. active→active or reversed→reversed: no ledger change. Re-activating a RETURNED or DISAPPROVED application is allowed (e.g. if status was changed by mistake). status_updated_by on the application is auto-set to approver_id."
             },
@@ -774,8 +1337,14 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-approvals/application/1",
-                "host": ["{{base_url}}"],
-                "path": ["leave-approvals", "application", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-approvals",
+                  "application",
+                  "1"
+                ]
               },
               "description": "Returns all approval records for a specific leave application, ordered by level ascending."
             },
@@ -783,7 +1352,6 @@
           }
         ]
       },
-
       {
         "name": "Special Orders",
         "item": [
@@ -791,16 +1359,29 @@
             "name": "Create Special Order",
             "request": {
               "method": "POST",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"special_order\": \"SO-2026-001\",\n  \"activity_name\": \"Regional Year-End Assessment\",\n  \"reference\": \"REF-2026-001\",\n  \"date_of_activity\": \"2026-06-10\"\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/special-orders",
-                "host": ["{{base_url}}"],
-                "path": ["special-orders"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "special-orders"
+                ]
               },
               "description": "Creates a new Special Order. special_order number must be unique — returns 409 if it already exists.\n- special_order: REQUIRED — SO number (e.g. SO-2026-001)\n- activity_name: REQUIRED — name of the activity\n- date_of_activity: REQUIRED — YYYY-MM-DD\n- reference: optional"
             },
@@ -813,14 +1394,39 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/special-orders/filter?year=2026&page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["special-orders", "filter"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "special-orders",
+                  "filter"
+                ],
                 "query": [
-                  { "key": "year", "value": "2026", "description": "Filter by calendar year of date_of_activity" },
-                  { "key": "date_from", "value": "2026-01-01", "description": "Lower bound of date_of_activity (YYYY-MM-DD)", "disabled": true },
-                  { "key": "date_to", "value": "2026-12-31", "description": "Upper bound of date_of_activity (YYYY-MM-DD)", "disabled": true },
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "year",
+                    "value": "2026",
+                    "description": "Filter by calendar year of date_of_activity"
+                  },
+                  {
+                    "key": "date_from",
+                    "value": "2026-01-01",
+                    "description": "Lower bound of date_of_activity (YYYY-MM-DD)",
+                    "disabled": true
+                  },
+                  {
+                    "key": "date_to",
+                    "value": "2026-12-31",
+                    "description": "Upper bound of date_of_activity (YYYY-MM-DD)",
+                    "disabled": true
+                  },
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Filters Special Orders by year and/or date range on date_of_activity. All params are optional and combinable. Returns count, total, page, limit, filters (echoes applied filters only), and data ordered by date_of_activity descending."
@@ -834,12 +1440,27 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/special-orders/search?q=SO-2026&page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["special-orders", "search"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "special-orders",
+                  "search"
+                ],
                 "query": [
-                  { "key": "q", "value": "SO-2026", "description": "Search keyword — matches against special_order number and activity_name (partial match)" },
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "q",
+                    "value": "SO-2026",
+                    "description": "Search keyword — matches against special_order number and activity_name (partial match)"
+                  },
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Searches Special Orders by special_order number or activity_name using a partial match. q is required — returns 400 if blank."
@@ -853,11 +1474,21 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/special-orders?page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["special-orders"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "special-orders"
+                ],
                 "query": [
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Returns a paginated list of all Special Orders ordered by date_of_activity descending."
@@ -871,8 +1502,13 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/special-orders/1",
-                "host": ["{{base_url}}"],
-                "path": ["special-orders", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "special-orders",
+                  "1"
+                ]
               },
               "description": "Returns a single Special Order by its primary key ID."
             },
@@ -880,7 +1516,6 @@
           }
         ]
       },
-
       {
         "name": "Service Credit Applications (CTO / VSC)",
         "item": [
@@ -888,16 +1523,29 @@
             "name": "Submit Service Credit Application",
             "request": {
               "method": "POST",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": {
                 "mode": "raw",
                 "raw": "{\n  \"employee_id\": 1,\n  \"special_order_id\": 1,\n  \"hours_rendered\": 16,\n  \"participation_dates\": [\"2026-06-10\", \"2026-06-11\"],\n  \"date_filed\": \"2026-06-18\",\n  \"date_of_upload\": \"2026-06-18\",\n  \"uploaded_by\": 2\n}",
-                "options": { "raw": { "language": "json" } }
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
               },
               "url": {
                 "raw": "{{base_url}}/service-credit-applications",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications"
+                ]
               },
               "description": "Submits a CTO or VSC service credit application. Balance is credited IMMEDIATELY on submission — no approval step.\n\nCredit type is auto-derived from employee classification — do NOT send 'type' in the body:\n- TEACHING employee → VSC (Vacation Service Credits)\n- NON_TEACHING employee → CTO (Compensatory Time Off)\n\n- special_order_id: REQUIRED — FK to special_orders.id; create the Special Order first via POST /special-orders\n- balance_earned is auto-computed (hours_rendered / 8 * 1.5)\n- valid_until: auto-computed from the latest participation date + 1 year (CTO only); always null for VSC\n- date_of_upload, uploaded_by: optional\n- uploaded_by: employee ID (FK to employees.id); returns 404 if not found"
             },
@@ -910,11 +1558,21 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications?page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications"
+                ],
                 "query": [
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Returns a paginated list of all service credit applications (CTO and VSC), ordered by date filed descending. Each record includes a participation_dates list."
@@ -928,8 +1586,13 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications/1",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications",
+                  "1"
+                ]
               },
               "description": "Returns a single service credit application by ID including employee details and participation_dates list."
             },
@@ -942,8 +1605,15 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications/employee/1/cto-leave-summary",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications", "employee", "1", "cto-leave-summary"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications",
+                  "employee",
+                  "1",
+                  "cto-leave-summary"
+                ]
               },
               "description": "Returns all CTO service credit records for an employee ordered by earliest valid_until first. Each credit includes uploaded_by, uploaded_by_name, date_of_upload, and participation_dates (the inclusive activity dates from service_credit_dates). Each credit carries a 'leave_applications' array of CTO leave applications primarily charged to it — each with username, remarks, date_of_action (approved_at), and approver_name from the latest approval record. When a leave spans multiple credits it is assigned to the credit whose original_balance >= total_days (won't go negative); if none qualifies, falls back to the credit with the largest deduction, lowest ID as tiebreaker."
             },
@@ -956,8 +1626,15 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications/employee/3/vsc-old-leave-summary",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications", "employee", "3", "vsc-old-leave-summary"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications",
+                  "employee",
+                  "3",
+                  "vsc-old-leave-summary"
+                ]
               },
               "description": "Returns VSC service credits earned from activities with date_of_activity < 2024-10-01 for a teaching employee, each with the VSC leave applications primarily charged to it. No valid_until field. Leave assignment uses the 'won't go negative' rule (original_balance >= total_days); ties break by highest service_credit_application_id."
             },
@@ -970,8 +1647,15 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications/employee/3/vsc-new-leave-summary",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications", "employee", "3", "vsc-new-leave-summary"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications",
+                  "employee",
+                  "3",
+                  "vsc-new-leave-summary"
+                ]
               },
               "description": "Returns VSC service credits earned from activities with date_of_activity >= 2024-10-01 for a teaching employee, each with the VSC leave applications primarily charged to it. No valid_until field. Leave assignment uses the 'won't go negative' rule (original_balance >= total_days); ties break by highest service_credit_application_id."
             },
@@ -984,8 +1668,14 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications/employee/1",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications", "employee", "1"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications",
+                  "employee",
+                  "1"
+                ]
               },
               "description": "Returns all service credit applications for a specific employee, ordered by creation date descending. Each record includes participation_dates."
             },
@@ -998,11 +1688,23 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications/special-order/1?page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications", "special-order", "1"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications",
+                  "special-order",
+                  "1"
+                ],
                 "query": [
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Returns a paginated list of all service credit applications linked to the given Special Order. Response includes a 'special_order' object with SO context (id, special_order number, activity_name). Returns 404 if the Special Order does not exist."
@@ -1016,12 +1718,29 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications/special-order/1/search?q=juan&page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications", "special-order", "1", "search"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications",
+                  "special-order",
+                  "1",
+                  "search"
+                ],
                 "query": [
-                  { "key": "q", "value": "juan", "description": "Search keyword — matches application_number, employee_number, first_name, last_name (partial match)" },
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "q",
+                    "value": "juan",
+                    "description": "Search keyword — matches application_number, employee_number, first_name, last_name (partial match)"
+                  },
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Searches service credit applications within a specific Special Order by application number, employee number, first name, or last name using a partial match. q is required — returns 400 if blank. Returns 404 if the Special Order does not exist. Response includes a 'special_order' context object."
@@ -1035,8 +1754,14 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications/number/SC-A1B2C3D4",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications", "number", "SC-A1B2C3D4"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications",
+                  "number",
+                  "SC-A1B2C3D4"
+                ]
               },
               "description": "Returns a single service credit application by its unique application number (e.g. SC-A1B2C3D4). No pagination. Returns 404 if not found. Includes Special Order fields (special_order, activity_name, reference, date_of_activity), employee details, and participation_dates."
             },
@@ -1049,16 +1774,52 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/service-credit-applications/search?type=CTO&year=2026&page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["service-credit-applications", "search"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "service-credit-applications",
+                  "search"
+                ],
                 "query": [
-                  { "key": "special_order_id", "value": "1", "description": "Filter by Special Order FK (integer)", "disabled": true },
-                  { "key": "type", "value": "CTO", "description": "Filter by credit type: CTO | VSC" },
-                  { "key": "year", "value": "2026", "description": "Filter by calendar year of date_filed" },
-                  { "key": "date_from", "value": "2026-01-01", "description": "Lower bound of date_filed range (YYYY-MM-DD)", "disabled": true },
-                  { "key": "date_to", "value": "2026-12-31", "description": "Upper bound of date_filed range (YYYY-MM-DD)", "disabled": true },
-                  { "key": "page", "value": "1", "description": "Page number (default 1)" },
-                  { "key": "limit", "value": "10", "description": "Records per page (default 10)" }
+                  {
+                    "key": "special_order_id",
+                    "value": "1",
+                    "description": "Filter by Special Order FK (integer)",
+                    "disabled": true
+                  },
+                  {
+                    "key": "type",
+                    "value": "CTO",
+                    "description": "Filter by credit type: CTO | VSC"
+                  },
+                  {
+                    "key": "year",
+                    "value": "2026",
+                    "description": "Filter by calendar year of date_filed"
+                  },
+                  {
+                    "key": "date_from",
+                    "value": "2026-01-01",
+                    "description": "Lower bound of date_filed range (YYYY-MM-DD)",
+                    "disabled": true
+                  },
+                  {
+                    "key": "date_to",
+                    "value": "2026-12-31",
+                    "description": "Upper bound of date_filed range (YYYY-MM-DD)",
+                    "disabled": true
+                  },
+                  {
+                    "key": "page",
+                    "value": "1",
+                    "description": "Page number (default 1)"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10",
+                    "description": "Records per page (default 10)"
+                  }
                 ]
               },
               "description": "Paginated search with optional filters. All filters are optional and combinable. Returns count, total, page, limit, filters (echoes applied filters only), and data.\n- special_order_id: filter by Special Order FK\n- type: CTO or VSC (returns 400 for other values)\n- year: calendar year of date_filed\n- date_from / date_to: date range on date_filed (YYYY-MM-DD)\nResults ordered by date_filed DESC."
@@ -1067,7 +1828,6 @@
           }
         ]
       },
-
       {
         "name": "Leave Types",
         "item": [
@@ -1079,16 +1839,40 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-types",
-                "host": ["{{base_url}}"],
-                "path": ["leave-types"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-types"
+                ]
               },
               "description": "Returns all leave types ordered by code. Includes code, name, balance_type (SELF / CHARGED_TO_VL / NONE), and is_active flag."
+            },
+            "response": []
+          },
+          {
+            "name": "Get Teaching Leave Types",
+            "id": "ad226093-fe3f-4ce5-9114-531e77810374",
+            "request": {
+              "method": "GET",
+              "header": [],
+              "url": {
+                "raw": "{{base_url}}/leave-types/teaching/1",
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-types",
+                  "teaching",
+                  "1"
+                ]
+              },
+              "description": "Returns all leave types available for teaching staff (excludes SL and PR which use VSC credits). Replace '1' with the target employee ID. Returns 404 if the employee does not exist."
             },
             "response": []
           }
         ]
       },
-
       {
         "name": "Leave Credit Transactions",
         "item": [
@@ -1100,11 +1884,23 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-credit-transactions/employee/1?page=1&limit=10",
-                "host": ["{{base_url}}"],
-                "path": ["leave-credit-transactions", "employee", "1"],
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-credit-transactions",
+                  "employee",
+                  "1"
+                ],
                 "query": [
-                  { "key": "page", "value": "1" },
-                  { "key": "limit", "value": "10" }
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  }
                 ]
               },
               "description": "Returns paginated ledger transactions (CREDIT and DEBIT) for a specific employee, ordered by transaction date descending. Includes leave type code and name."
@@ -1118,8 +1914,16 @@
               "header": [],
               "url": {
                 "raw": "{{base_url}}/leave-credit-transactions/employee/1/year/2026",
-                "host": ["{{base_url}}"],
-                "path": ["leave-credit-transactions", "employee", "1", "year", "2026"]
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "leave-credit-transactions",
+                  "employee",
+                  "1",
+                  "year",
+                  "2026"
+                ]
               },
               "description": "Returns all ledger transactions (CREDIT and DEBIT) for a specific employee in the given calendar year, ordered by transaction date descending. Includes leave type code and name."
             },
@@ -1127,7 +1931,6 @@
           }
         ]
       }
-
     ]
   }
 }

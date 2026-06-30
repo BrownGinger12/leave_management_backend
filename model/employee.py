@@ -52,6 +52,7 @@ class Employee(BaseModel):
     position: Optional[str] = None  # job position or title, optional
     salary: Optional[float] = None  # monthly salary, optional
     contact_number: Optional[str] = None  # employee contact number, optional
+    notes: Optional[str] = None  # free-text notes about the employee, optional
     is_active: Optional[bool] = True  # True = active, False = soft-deleted
     photo: Optional[str] = None  # path/URL to the employee's photo, optional
 
@@ -133,8 +134,8 @@ class Employee(BaseModel):
                        (leave_card_number, employee_number, first_name, last_name,
                         middle_name, email, employee_type, employment_status, school_id,
                         division, original_appointment, latest_appointment,
-                        position, salary, contact_number, is_active, photo)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        position, salary, contact_number, notes, is_active, photo)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 [
                     leave_card_number,                   # generated leave card number
                     data["employee_number"],             # DepEd employee number
@@ -151,6 +152,7 @@ class Employee(BaseModel):
                     data.get("position"),                # job position or title, may be None
                     data.get("salary"),                  # monthly salary, may be None
                     data.get("contact_number"),          # contact number, may be None
+                    data.get("notes"),                   # free-text notes, may be None
                     data.get("is_active", True),         # active status, defaults to True
                     data.get("photo"),                   # photo path/URL, may be None
                 ]
@@ -283,7 +285,7 @@ class Employee(BaseModel):
                 "first_name", "last_name", "middle_name",
                 "email", "employee_type", "employment_status", "school_id",
                 "division", "original_appointment", "latest_appointment",
-                "position", "salary", "contact_number", "is_active", "photo"
+                "position", "salary", "contact_number", "notes", "is_active", "photo"
             ]
 
             fields = {  # filter to only allowed, non-None fields

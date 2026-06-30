@@ -17,6 +17,7 @@ from handler import leave_credit_transaction_handler  # import leave credit tran
 from handler import school_handler  # import school handler functions
 from handler import position_handler  # import position handler functions
 from handler import calendar_event_handler  # import calendar event handler functions
+from handler import leave_monetization_handler  # import leave monetization handler functions
 
 load_dotenv()  # load environment variables from .env file into os.environ
 
@@ -96,6 +97,7 @@ app.add_url_rule("/uploads/employee_photos/<path:filename>", view_func=employee_
 # --------------------------
 
 app.add_url_rule("/leave-types", view_func=leave_type_handler.get_all_leave_types, methods=["GET"])  # get all leave types
+app.add_url_rule("/leave-types/teaching/<int:employee_id>", view_func=leave_type_handler.get_teaching_leave_types, methods=["GET"])  # get leave types for teaching staff by employee (excludes SL and PR)
 
 
 # --------------------------
@@ -137,6 +139,17 @@ app.add_url_rule("/leave-applications/<int:application_id>", view_func=leave_app
 app.add_url_rule("/leave-applications/<int:application_id>", view_func=leave_application_handler.delete_leave_application, methods=["DELETE"])  # soft-delete; reverses balance if not already returned/disapproved
 app.add_url_rule("/leave-applications/employee/<int:employee_id>", view_func=leave_application_handler.get_leave_applications_by_employee, methods=["GET"])  # get all by employee (excludes CTO/VSC)
 app.add_url_rule("/leave-applications/employee/<int:employee_id>/year/<int:year>", view_func=leave_application_handler.get_leave_applications_by_employee_and_year, methods=["GET"])  # get all by employee and year with ledger (excludes CTO/VSC)
+
+
+# --------------------------
+# Leave Monetization routes
+# --------------------------
+
+app.add_url_rule("/leave-monetizations", view_func=leave_monetization_handler.submit_monetization, methods=["POST"])  # submit a leave monetization; deducts VL and/or SL immediately
+app.add_url_rule("/leave-monetizations", view_func=leave_monetization_handler.get_all_monetizations, methods=["GET"])  # list all monetizations (paginated)
+app.add_url_rule("/leave-monetizations/<int:monetization_id>", view_func=leave_monetization_handler.get_monetization_by_id, methods=["GET"])  # get by ID
+app.add_url_rule("/leave-monetizations/<int:monetization_id>", view_func=leave_monetization_handler.delete_monetization, methods=["DELETE"])  # soft-delete; reverses balance if not already returned/disapproved
+app.add_url_rule("/leave-monetizations/employee/<int:employee_id>", view_func=leave_monetization_handler.get_monetizations_by_employee, methods=["GET"])  # get all by employee
 
 
 # --------------------------

@@ -1030,7 +1030,14 @@ class ServiceCreditApplication(BaseModel):
                 "data": [],
             }
 
+        pool = "OLD" if "old" in balance_table else "NEW"  # determine credit pool from table name
+
         sca_ids = [c["service_credit_application_id"] for c in credits]  # collect all SCA IDs
+        credit_balance_id_map = {  # map: credit_balance_id -> service_credit_application_id
+            c["credit_balance_id"]: c["service_credit_application_id"] for c in credits
+        }
+        credit_balance_ids = list(credit_balance_id_map.keys())  # IDs of the credit balance rows
+
         sca_dates_map = {sid: [] for sid in sca_ids}  # init per-SCA participation dates map
         sca_placeholders = ", ".join(["%s"] * len(sca_ids))  # build IN clause placeholders
         date_rows = fetch_query(  # fetch all participation dates for these service credit applications
@@ -1043,18 +1050,25 @@ class ServiceCreditApplication(BaseModel):
         for dr in (date_rows or []):  # group dates under their parent SCA ID
             sca_dates_map[dr["service_credit_application_id"]].append(str(dr["date"]))
 
-        assignment = ServiceCreditApplication._assign_vsc_leaves(employee_id)  # get combined period assignment
+        # Fetch all deduction log entries for this pool and these specific credit balance IDs
+        deduction_logs = []  # list of (credit_balance_id, leave_application_id, amount_deducted)
+        if credit_balance_ids:  # only query if there are credits to check
+            cb_placeholders = ", ".join(["%s"] * len(credit_balance_ids))  # build IN clause
+            deduction_logs = fetch_query(  # fetch log rows for these credits in this pool
+                f"""SELECT vdl.credit_balance_id, vdl.leave_application_id, vdl.amount_deducted
+                    FROM vsc_deduction_log vdl
+                    WHERE vdl.credit_pool = %s AND vdl.credit_balance_id IN ({cb_placeholders})
+                    ORDER BY vdl.id ASC""",
+                [pool] + credit_balance_ids
+            ) or []
 
-        this_period_sca_ids = set(sca_ids)  # IDs belonging to this period
-        period_app_ids = [  # leave application IDs whose primary credit is in this period
-            app_id for app_id, sca_id in assignment.items()
-            if sca_id in this_period_sca_ids
-        ]
+        # Collect unique leave application IDs referenced in the deduction log
+        log_app_ids = list({row["leave_application_id"] for row in deduction_logs})  # deduplicated
 
         app_details = {}  # map: leave_application_id -> full leave application dict
-        if period_app_ids:  # only query if there are assigned applications
-            app_placeholders = ", ".join(["%s"] * len(period_app_ids))  # build IN clause
-            rows = fetch_query(  # fetch full leave application data with approval info and username
+        if log_app_ids:  # only query if there are applications to fetch
+            app_placeholders = ", ".join(["%s"] * len(log_app_ids))  # build IN clause
+            rows = fetch_query(  # fetch full leave application data with approval info
                 f"""SELECT la.*,
                            lt.code AS leave_type_code,
                            lt.name AS leave_type_name,
@@ -1075,15 +1089,23 @@ class ServiceCreditApplication(BaseModel):
                     LEFT JOIN employees approver_emp ON approver_emp.id = latest_appr.approver_id
                     WHERE la.id IN ({app_placeholders})
                     ORDER BY start_date ASC""",
-                period_app_ids
+                log_app_ids
             )
             for row in (rows or []):  # index by application ID for O(1) lookup
                 app_details[row["id"]] = dict(row)
 
-        credit_to_apps = {c["service_credit_application_id"]: [] for c in credits}  # init per-credit app list
-        for app_id, sca_id in assignment.items():  # group leave apps under their assigned credit
-            if sca_id in credit_to_apps and app_id in app_details:  # only include this period's credits
-                credit_to_apps[sca_id].append(app_details[app_id])
+        # Group deduction log entries by credit_balance_id
+        deduction_by_credit = {}  # credit_balance_id -> list of {leave_application_id, amount_deducted}
+        for log_row in deduction_logs:  # iterate log entries
+            cb_id = log_row["credit_balance_id"]  # which credit was charged
+            if cb_id not in deduction_by_credit:  # init list if needed
+                deduction_by_credit[cb_id] = []
+            deduction_by_credit[cb_id].append({  # store deduction info
+                "leave_application_id": log_row["leave_application_id"],
+                "amount_deducted": float(log_row["amount_deducted"]),
+            })
+
+        REVERSED_STATUSES = {"RETURNED", "DISAPPROVED"}  # statuses that do NOT reduce credit balance
 
         result = []  # list of credit records with nested leave applications
         for credit in credits:  # iterate credits
@@ -1091,9 +1113,29 @@ class ServiceCreditApplication(BaseModel):
             credit_row["participation_dates"] = sca_dates_map.get(  # attach participation dates
                 credit["service_credit_application_id"], []
             )
-            credit_row["leave_applications"] = credit_to_apps.get(  # attach assigned leave applications
-                credit["service_credit_application_id"], []
-            )
+
+            cb_id = credit["credit_balance_id"]  # this credit's balance row ID
+            log_entries = deduction_by_credit.get(cb_id, [])  # deduction log entries for this credit
+
+            running_balance = float(credit["original_balance"])  # running balance starts at original
+            leave_applications = []  # enriched leave application rows for this credit
+
+            for entry in log_entries:  # iterate deductions in insertion order (chronological)
+                app = app_details.get(entry["leave_application_id"])  # fetch application details
+                if not app:  # application no longer accessible (deleted etc.)
+                    continue
+
+                is_active = app["status"] not in REVERSED_STATUSES  # active apps reduce balance
+                amount_from_credit = entry["amount_deducted"] if is_active else 0.0  # reversed apps contribute 0
+                running_balance -= amount_from_credit  # apply deduction to running balance
+
+                leave_applications.append({  # build enriched row for this application
+                    **app,  # all leave application fields
+                    "amount_from_credit": amount_from_credit,  # days charged to this specific credit
+                    "balance_after": round(running_balance, 3),  # running balance after this deduction
+                })
+
+            credit_row["leave_applications"] = leave_applications  # attach enriched leave apps
             result.append(credit_row)  # add to output list
 
         return {  # return summary response

@@ -106,6 +106,75 @@ class LeaveApproval(BaseModel):
         return None  # CTO credits fully restored
 
     # --------------------------
+    # Restore VSC per-credit balances on reversal
+    # --------------------------
+
+    @staticmethod
+    def _restore_vsc(employee_id: int, application_id: int, start_date: str) -> dict | None:
+        """
+        Restores VSC per-credit balances when a VSC-funded leave (SL or PR) is returned
+        or disapproved. Reads vsc_deduction_log to find which credits were charged, adds
+        each amount back to the appropriate table (OLD → vsc_old_credit_balances,
+        NEW → vsc_new_credit_balances), posts a matching CREDIT ledger entry per deduction
+        row, then recalculates VSC snapshots once. Log entries are kept as audit trail;
+        _deduct_vsc will clear them on re-activation before re-inserting.
+
+        Parameters:
+            employee_id (int): The employee whose VSC credits are being restored.
+            application_id (int): The leave application being reversed.
+            start_date (str): First day of the leave (same date as the original DEBIT entries).
+
+        Returns:
+            dict | None: An error dict if any step fails, None on full success.
+        """
+        vsc_type = fetch_query(  # fetch VSC leave type ID for CREDIT ledger entries
+            "SELECT id FROM leave_types WHERE code = 'VSC'", []
+        )
+        if not vsc_type:  # VSC type not found in system
+            return {"statusCode": 500, "message": "VSC leave type not found in the system"}  # return error
+        vsc_leave_type_id = vsc_type[0]["id"]  # VSC leave type ID for all CREDIT entries
+
+        logs = fetch_query(  # fetch all deduction log rows tied to this application
+            "SELECT id, credit_pool, credit_balance_id, amount_deducted FROM vsc_deduction_log WHERE leave_application_id = %s",
+            [application_id]
+        )
+
+        if not logs:  # no log entries — nothing was deducted or already restored
+            return None  # nothing to restore
+
+        for log in logs:  # iterate each partial deduction recorded at submission
+            table = "vsc_old_credit_balances" if log["credit_pool"] == "OLD" else "vsc_new_credit_balances"  # determine credit table
+
+            restore_result = query(  # add the deducted amount back to this credit's remaining balance
+                f"UPDATE {table} SET remaining_balance = remaining_balance + %s WHERE id = %s",
+                [log["amount_deducted"], log["credit_balance_id"]]
+            )
+            if restore_result["statusCode"] != 200:  # check if balance restore failed
+                return restore_result  # return the error
+
+            pool_label = log["credit_pool"].lower()  # format pool name for ledger remarks
+            txn_result = query_insert(  # post CREDIT ledger entry matching each original DEBIT
+                """INSERT INTO leave_credit_transactions
+                       (transaction_number, employee_id, leave_type_id, transaction_type,
+                        amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+                   VALUES (%s, %s, %s, 'CREDIT', %s, 'LEAVE_APPLICATION', %s, %s, 0, %s)""",
+                [
+                    LeaveApproval._generate_transaction_number(),  # unique transaction number
+                    employee_id,                    # employee being restored
+                    vsc_leave_type_id,              # VSC leave type for the ledger entry
+                    log["amount_deducted"],          # days being restored to this credit
+                    application_id,                 # source: the reversed leave application
+                    start_date,                     # same date as original DEBIT for correct ledger pairing
+                    f"Leave reversed — VSC ({pool_label}) credit restored",  # audit trail
+                ]
+            )
+            if txn_result["statusCode"] != 200:  # check if CREDIT insert failed
+                return txn_result  # return the error
+
+        recalculate_ledger_snapshots(employee_id, vsc_leave_type_id)  # recalculate all VSC snapshots once
+        return None  # VSC credits fully restored
+
+    # --------------------------
     # Post credit reversal to ledger
     # --------------------------
 
@@ -186,6 +255,13 @@ class LeaveApproval(BaseModel):
 
             return None  # both FL and VL reversals posted successfully
 
+        if balance_type == "CHARGED_TO_VSC":  # PR — restore new VSC credits via per-credit log
+            return LeaveApproval._restore_vsc(  # delegate to VSC-specific restoration
+                employee_id=employee_id,
+                application_id=application_id,
+                start_date=start_date,
+            )
+
         # SELF — restore the leave type's own balance
         if leave_type_code == "CTO":  # CTO deductions span multiple credits; use per-credit restoration
             return LeaveApproval._restore_cto(  # delegate to CTO-specific reversal that reads cto_deduction_log
@@ -194,6 +270,19 @@ class LeaveApproval(BaseModel):
                 application_id=application_id,
                 start_date=start_date,
             )
+
+        if leave_type_code == "SL":  # SL may have used VSC credits — check log before regular reversal
+            vsc_logs = fetch_query(  # check if any VSC deductions exist for this application
+                "SELECT id FROM vsc_deduction_log WHERE leave_application_id = %s LIMIT 1",
+                [application_id]
+            )
+            if vsc_logs:  # VSC was used for this SL leave — restore per-credit VSC balances
+                return LeaveApproval._restore_vsc(  # delegate to VSC-specific restoration
+                    employee_id=employee_id,
+                    application_id=application_id,
+                    start_date=start_date,
+                )
+            # No VSC entries — fall through to regular SL CREDIT reversal below
 
         insert_result = query_insert(  # insert CREDIT reversal for the leave type balance (VL, SL, VSC, etc.)
             """INSERT INTO leave_credit_transactions

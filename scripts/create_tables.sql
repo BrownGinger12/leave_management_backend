@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS employees (
     position            VARCHAR(150) DEFAULT NULL,                               -- job position or title, optional
     salary              DECIMAL(12, 2) DEFAULT NULL,                             -- monthly salary, optional
     contact_number      VARCHAR(20) DEFAULT NULL,                                -- contact number, optional
+    notes               TEXT DEFAULT NULL,                                       -- free-text notes about the employee, optional
     is_active           TINYINT(1) NOT NULL DEFAULT 1,                           -- 1 = active, 0 = soft-deleted
     photo               VARCHAR(255) DEFAULT NULL,                               -- path/URL to the employee's photo, optional
     created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,                      -- record creation timestamp
@@ -43,7 +44,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
     id              INT AUTO_INCREMENT PRIMARY KEY,                              -- unique row identifier
     code            VARCHAR(10)  NOT NULL UNIQUE,                               -- short leave code (e.g. VL, SL, CTO)
     name            VARCHAR(100) NOT NULL,                                      -- full descriptive name of the leave type
-    balance_type    ENUM('SELF', 'CHARGED_TO_VL', 'NONE') NOT NULL,            -- how the balance is sourced: own, deducted from VL, or not required
+    balance_type    ENUM('SELF', 'CHARGED_TO_VL', 'CHARGED_TO_VSC', 'NONE') NOT NULL,  -- how the balance is sourced: own, deducted from VL, deducted from VSC, or not required
     is_active       TINYINT(1) NOT NULL DEFAULT 1,                              -- 1 = active and available for application, 0 = disabled
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,                         -- record creation timestamp
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP  -- record last update timestamp
@@ -64,6 +65,8 @@ CREATE TABLE IF NOT EXISTS leave_applications (
     other_leave_description VARCHAR(255) DEFAULT NULL,                          -- additional description when leave type is "Others"
     status                  ENUM('FOR HRMO ACTION', 'FOR APPROVAL', 'RETURNED', 'DISAPPROVED', 'APPROVED') NOT NULL DEFAULT 'FOR HRMO ACTION',  -- current status in the workflow
     status_updated_by       INT DEFAULT NULL,                                   -- FK to employees.id; the approver who last changed the status
+    mnt_vl_days             DECIMAL(8, 2) DEFAULT NULL,                         -- VL days deducted via monetization (MNT type only; NULL for regular leave)
+    mnt_sl_days             DECIMAL(8, 2) DEFAULT NULL,                         -- SL days deducted via monetization (MNT type only; NULL for regular leave)
     is_deleted              TINYINT(1) NOT NULL DEFAULT 0,                      -- 1 = soft-deleted; excluded from all queries
     deleted_at              DATETIME DEFAULT NULL,                              -- timestamp when the record was soft-deleted
     deleted_by              INT DEFAULT NULL,                                   -- FK to users.id; the user who performed the soft delete
@@ -170,7 +173,7 @@ CREATE TABLE IF NOT EXISTS leave_credit_transactions (
     leave_type_id           INT NOT NULL,                                       -- FK to leave_types.id
     transaction_type        ENUM('CREDIT', 'DEBIT') NOT NULL,                  -- CREDIT = balance increase, DEBIT = balance decrease
     amount                  DECIMAL(8, 2) NOT NULL,                             -- number of days credited or debited
-    source_type             ENUM('SPECIAL_ORDER', 'LEAVE_APPLICATION', 'MANUAL_ADJUSTMENT', 'SYSTEM_ADJUSTMENT') NOT NULL,  -- origin of the transaction
+    source_type             ENUM('SPECIAL_ORDER', 'LEAVE_APPLICATION', 'MANUAL_ADJUSTMENT', 'SYSTEM_ADJUSTMENT', 'HOLIDAY_REFUND', 'MONETIZATION') NOT NULL,  -- origin of the transaction
     source_id               INT NOT NULL,                                       -- ID of the source record (e.g. leave_application.id)
     transaction_date        DATE NOT NULL,                                      -- date the transaction took effect
     balance_snapshot_after  DECIMAL(8, 2) NOT NULL,                             -- employee's balance immediately after this transaction
@@ -573,7 +576,27 @@ CREATE TABLE IF NOT EXISTS vsc_new_credit_balances (
 );
 
 -- ============================================================
--- 15. calendar_events
+-- 15. vsc_deduction_log
+--     Tracks per-credit VSC deductions for SL and PR leave applications.
+--     Each row records exactly how much was taken from one specific OLD or NEW
+--     VSC credit record. Used for correct reversal and summary display.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS vsc_deduction_log (
+    id                      INT AUTO_INCREMENT PRIMARY KEY,                               -- unique row identifier
+    leave_application_id    INT NOT NULL,                                                 -- FK to the leave application that caused this deduction
+    credit_pool             ENUM('OLD', 'NEW') NOT NULL,                                 -- which VSC pool: OLD (vsc_old_credit_balances) or NEW (vsc_new_credit_balances)
+    credit_balance_id       INT NOT NULL,                                                 -- ID within vsc_old_credit_balances or vsc_new_credit_balances depending on credit_pool
+    amount_deducted         DECIMAL(10, 2) NOT NULL,                                      -- days deducted from this specific credit
+    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,                          -- record creation timestamp
+
+    CONSTRAINT fk_vsc_log_leave_app
+        FOREIGN KEY (leave_application_id) REFERENCES leave_applications(id)
+        ON DELETE CASCADE ON UPDATE CASCADE                                               -- remove log when leave application is deleted
+);
+
+-- ============================================================
+-- 16. calendar_events
 --     Tracks holidays and special days that affect leave rules.
 --     blocks_leave = 1: cannot apply leave on this date (holiday).
 --     is_paid = 0: leave applied on this date is no-pay.
@@ -591,6 +614,38 @@ CREATE TABLE IF NOT EXISTS calendar_events (
     FOREIGN KEY (created_by) REFERENCES users(id)                            -- link to the admin user
 );
 
+-- ============================================================
+-- 17. leave_refunded_dates
+--     Records each holiday refund applied to a leave application.
+--     One row per credit posted; multiple rows per application
+--     when the leave type credits more than one balance (e.g. FL
+--     credits both FL and VL).
+--     Idempotency: before processing, check if any row exists
+--     for (leave_application_id, holiday_date).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS leave_refunded_dates (
+    id                      INT AUTO_INCREMENT PRIMARY KEY,                     -- unique row identifier
+    leave_application_id    INT NOT NULL,                                       -- FK to the leave application that received the refund
+    calendar_event_id       INT NOT NULL,                                       -- FK to the holiday calendar event that triggered the refund
+    holiday_date            DATE NOT NULL,                                      -- the holiday date that was refunded
+    amount_refunded         DECIMAL(8, 2) NOT NULL,                             -- days credited back to the balance
+    credited_leave_type_id  INT NOT NULL,                                       -- FK to leave_types.id; the balance type that was credited
+    refunded_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,                -- when the refund was recorded
+
+    CONSTRAINT fk_lrd_app
+        FOREIGN KEY (leave_application_id) REFERENCES leave_applications(id)
+        ON DELETE CASCADE ON UPDATE CASCADE,                                    -- remove log when application is deleted
+
+    CONSTRAINT fk_lrd_event
+        FOREIGN KEY (calendar_event_id) REFERENCES calendar_events(id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,                                   -- prevent deletion of a holiday with refund records
+
+    CONSTRAINT fk_lrd_leave_type
+        FOREIGN KEY (credited_leave_type_id) REFERENCES leave_types(id)
+        ON DELETE RESTRICT ON UPDATE CASCADE                                    -- prevent deletion of a leave type with refund records
+);
+
 INSERT INTO leave_types (code, name, balance_type, is_active) VALUES
     ('VL',  'Vacation Leave',                  'SELF',           1),  -- deducted from own VL balance
     ('SL',  'Sick Leave',                      'SELF',           1),  -- deducted from own SL balance
@@ -603,4 +658,7 @@ INSERT INTO leave_types (code, name, balance_type, is_active) VALUES
     ('CTO', 'Compensatory Time Off',           'SELF',           1),  -- deducted from own CTO balance
     ('VSC', 'Vacation Service Credits',        'SELF',           1),  -- deducted from own VSC balance
     ('OL',  'Others',                          'NONE',           1),  -- miscellaneous leave with no balance requirement
-    ('WL',  'Wellness Leave',                  'SELF',           1);  -- deducted from own WL balance
+    ('WL',  'Wellness Leave',                  'SELF',           1),  -- deducted from own WL balance
+    ('PR',  'Personal Reason',                 'CHARGED_TO_VSC', 1),  -- charged against VSC balance
+    ('SLBT','Solo Parent Leave (Teaching)',    'SELF',           1),  -- deducted from own SLBT balance
+    ('MNT', 'Monetization',                   'NONE',           1);  -- leave monetization; deducts from VL and/or SL via separate ledger entries

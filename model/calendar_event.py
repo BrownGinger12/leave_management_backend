@@ -1,6 +1,7 @@
 from gateway.mysql_gateway import fetch_query, query, query_insert  # import DB helpers
 from flask import g  # import g to read the authenticated user set by the auth decorator
 from datetime import date  # import date for current month/year resolution
+import threading  # import threading to spawn async holiday refund jobs
 
 
 class CalendarEvent:
@@ -95,10 +96,20 @@ class CalendarEvent:
         if result.get("statusCode") != 200:  # check for duplicate date or DB error
             return {"statusCode": 409, "message": "A calendar event already exists for this date"}  # conflict
 
+        event_id = result["insertId"]  # new calendar event primary key
+
+        if blocks_leave == 1:  # only holidays block leave and trigger refunds
+            from model.leave_application import LeaveApplication  # deferred import to avoid circular dependency
+            threading.Thread(  # spawn a background thread so the HTTP response is not blocked
+                target=LeaveApplication._refund_holiday,
+                args=(event_date, period, event_id),  # pass date, period, and event ID
+                daemon=True,  # thread exits automatically when the main process exits
+            ).start()
+
         return {  # build success response
             "statusCode": 201,  # HTTP 201 Created
             "message": "Calendar event created successfully",  # confirmation message
-            "id": result["insertId"],  # return the new record's ID
+            "id": event_id,  # return the new record's ID
         }
 
     @staticmethod
@@ -113,13 +124,15 @@ class CalendarEvent:
         Returns:
             dict with statusCode and message.
         """
-        existing = fetch_query(  # check the event exists before attempting update
-            "SELECT id FROM calendar_events WHERE id = %s",
+        existing = fetch_query(  # check the event exists and read current state before update
+            "SELECT id, date, period, blocks_leave FROM calendar_events WHERE id = %s",
             [event_id]
         )
 
         if not existing:  # event not found
             return {"statusCode": 404, "message": "Calendar event not found"}  # 404 not found
+
+        current = existing[0]  # current row values for change detection
 
         fields = []  # collect SET clauses dynamically
         values = []  # collect bound values in matching order
@@ -152,6 +165,18 @@ class CalendarEvent:
             f"UPDATE calendar_events SET {', '.join(fields)} WHERE id = %s",
             values  # bind all values including the WHERE id
         )
+
+        # Trigger holiday refund if blocks_leave was just switched on (0 → 1)
+        new_blocks = int(bool(data["blocks_leave"])) if "blocks_leave" in data else current["blocks_leave"]  # resolved new value
+        if new_blocks == 1 and current["blocks_leave"] == 0:  # transition from non-holiday to holiday
+            refund_date = data.get("date", str(current["date"])).strip()  # use updated date if changed
+            refund_period = data.get("period", current["period"] or "FULL").strip().upper()  # use updated period if changed
+            from model.leave_application import LeaveApplication  # deferred import to avoid circular dependency
+            threading.Thread(  # spawn background thread so response is not blocked
+                target=LeaveApplication._refund_holiday,
+                args=(refund_date, refund_period, event_id),  # pass resolved date, period, and event ID
+                daemon=True,  # thread exits automatically when main process exits
+            ).start()
 
         return {  # build success response
             "statusCode": 200,  # HTTP 200 OK
