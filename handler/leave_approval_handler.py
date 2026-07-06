@@ -1,12 +1,13 @@
 from flask import request, jsonify  # import request to read HTTP input and jsonify to build responses
 from model.leave_approval import LeaveApproval  # import the LeaveApproval model
+from gateway.auth_gateway import require_role  # import role decorator
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def decide_leave_application():
     """
     Handles POST /leave-approvals — processes an approver's APPROVED or REJECTED decision.
-    On APPROVED: posts a DEBIT to the ledger and updates the employee's balance cache.
-    On REJECTED: records the rejection and marks the application as REJECTED.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Returns:
         JSON response with the approval record and HTTP 200, or an error response.
@@ -24,9 +25,11 @@ def decide_leave_application():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_approvals_by_application(application_id: int):
     """
     Handles GET /leave-approvals/application/<application_id> — retrieves all approval records for an application.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         application_id (int): The leave application's primary key from the URL.

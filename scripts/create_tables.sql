@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS leave_credit_transactions (
     leave_type_id           INT NOT NULL,                                       -- FK to leave_types.id
     transaction_type        ENUM('CREDIT', 'DEBIT') NOT NULL,                  -- CREDIT = balance increase, DEBIT = balance decrease
     amount                  DECIMAL(8, 2) NOT NULL,                             -- number of days credited or debited
-    source_type             ENUM('SPECIAL_ORDER', 'LEAVE_APPLICATION', 'MANUAL_ADJUSTMENT', 'SYSTEM_ADJUSTMENT', 'HOLIDAY_REFUND', 'MONETIZATION') NOT NULL,  -- origin of the transaction
+    source_type             ENUM('SPECIAL_ORDER', 'LEAVE_APPLICATION', 'MANUAL_ADJUSTMENT', 'SYSTEM_ADJUSTMENT', 'HOLIDAY_REFUND', 'MONETIZATION', 'FORWARDED_BALANCE', 'UNDERTIME_TARDINESS', 'TYPE_CONVERSION') NOT NULL,  -- origin of the transaction
     source_id               INT NOT NULL,                                       -- ID of the source record (e.g. leave_application.id)
     transaction_date        DATE NOT NULL,                                      -- date the transaction took effect
     balance_snapshot_after  DECIMAL(8, 2) NOT NULL,                             -- employee's balance immediately after this transaction
@@ -323,7 +323,7 @@ CREATE TABLE IF NOT EXISTS users (
     employee_id     INT NOT NULL UNIQUE,                                          -- FK to employees.id; one account per employee
     username        VARCHAR(100) NOT NULL UNIQUE,                                 -- unique login username
     password_hash   VARCHAR(255) NOT NULL,                                        -- bcrypt hash of the password; never store plain text
-    role            ENUM('ADMIN', 'DIVISION_PERSONNEL', 'TEACHING_PERSONNEL') NOT NULL,  -- access level
+    role            ENUM('ADMIN', 'DIVISION_PERSONNEL', 'TEACHING_PERSONNEL', 'PAYROLL') NOT NULL,  -- access level
     is_active       TINYINT(1) NOT NULL DEFAULT 1,                                -- 1 = active, 0 = deactivated
     last_login_at   DATETIME DEFAULT NULL,                                        -- timestamp of the most recent successful login
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,                           -- record creation timestamp
@@ -644,6 +644,70 @@ CREATE TABLE IF NOT EXISTS leave_refunded_dates (
     CONSTRAINT fk_lrd_leave_type
         FOREIGN KEY (credited_leave_type_id) REFERENCES leave_types(id)
         ON DELETE RESTRICT ON UPDATE CASCADE                                    -- prevent deletion of a leave type with refund records
+);
+
+-- ============================================================
+-- 18. undertime_tardiness_deductions
+--     Records VL deductions applied to NON_TEACHING employees
+--     for accumulated undertime and tardiness points.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS undertime_tardiness_deductions (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,                          -- unique row identifier
+    application_number  VARCHAR(20) NOT NULL UNIQUE,                            -- system-generated number (e.g. UTD-A1B2C3D4)
+    employee_id         INT NOT NULL,                                            -- FK to employees.id; must be NON_TEACHING
+    undertime_points    DECIMAL(8, 4) NOT NULL DEFAULT 0,                       -- undertime accumulated (in days)
+    tardiness_points    DECIMAL(8, 4) NOT NULL DEFAULT 0,                       -- tardiness accumulated (in days)
+    total_points        DECIMAL(8, 4) NOT NULL,                                 -- undertime_points + tardiness_points
+    vl_deducted         DECIMAL(8, 4) NOT NULL,                                 -- amount deducted from VL balance (equals total_points)
+    deduction_date      DATE NOT NULL,                                           -- effective date of the deduction
+    remarks             TEXT DEFAULT NULL,                                       -- optional notes
+    is_deleted          TINYINT(1) NOT NULL DEFAULT 0,                          -- soft-delete flag; 1 = deleted (VL reversed)
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,                     -- record creation timestamp
+
+    CONSTRAINT fk_utd_employee
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+        ON DELETE RESTRICT ON UPDATE CASCADE                                     -- prevent employee deletion while deductions exist
+);
+
+-- ============================================================
+-- 23. employee_type_conversions
+--     Audit log for every personnel type change between
+--     TEACHING and NON_TEACHING.  Each row records the balances
+--     before and after the conversion so the history is fully
+--     traceable without reading ledger rows.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS employee_type_conversions (
+    id                      INT AUTO_INCREMENT PRIMARY KEY,                     -- unique row identifier
+    conversion_number       VARCHAR(20)  NOT NULL UNIQUE,                       -- system-generated reference (e.g. ETC-A1B2C3D4)
+    employee_id             INT NOT NULL,                                       -- FK to employees.id
+    from_type               ENUM('TEACHING', 'NON_TEACHING') NOT NULL,         -- employee type before conversion
+    to_type                 ENUM('TEACHING', 'NON_TEACHING') NOT NULL,         -- employee type after conversion
+
+    -- TEACHING → NON_TEACHING fields
+    vsc_balance_before      DECIMAL(10, 4) DEFAULT NULL,                        -- VSC balance zeroed during conversion
+    total_credits_converted DECIMAL(10, 4) DEFAULT NULL,                        -- total VL+SL credits produced from VSC
+    vl_balance_after        DECIMAL(10, 4) DEFAULT NULL,                        -- VL credits assigned after conversion
+
+    -- NON_TEACHING → TEACHING fields
+    sl_balance_after        DECIMAL(10, 4) DEFAULT NULL,                        -- SL credits assigned after conversion (TEACHING→NON_TEACHING) or 0 (NON_TEACHING→TEACHING)
+    vl_balance_before       DECIMAL(10, 4) DEFAULT NULL,                        -- VL balance zeroed during conversion
+    sl_balance_before       DECIMAL(10, 4) DEFAULT NULL,                        -- SL balance zeroed during conversion
+    vsc_balance_after       DECIMAL(10, 4) DEFAULT NULL,                        -- VSC credits assigned after conversion
+
+    conversion_date         DATE NOT NULL,                                      -- effective date of the conversion
+    remarks                 TEXT DEFAULT NULL,                                  -- optional notes
+    created_by              INT DEFAULT NULL,                                   -- FK to users.id; the admin who performed the conversion
+    created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,                 -- record creation timestamp
+
+    CONSTRAINT fk_etc_employee
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,                                   -- prevent employee deletion while conversion records exist
+
+    CONSTRAINT fk_etc_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON DELETE SET NULL ON UPDATE CASCADE                                    -- nullify if the user record is deleted
 );
 
 INSERT INTO leave_types (code, name, balance_type, is_active) VALUES

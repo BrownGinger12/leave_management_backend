@@ -1,12 +1,13 @@
 from flask import request, jsonify  # import request to read HTTP input and jsonify to build responses
 from model.leave_monetization import LeaveMonetization  # import the LeaveMonetization model
-from gateway.auth_gateway import require_auth  # import auth decorator to protect routes
+from gateway.auth_gateway import require_role  # import role decorator
 
 
-@require_auth
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def submit_monetization():
     """
     Handles POST /leave-monetizations — submits a new leave monetization request.
+    ADMIN and DIVISION_PERSONNEL only.
     Validates balance and deducts VL and/or SL immediately on submission.
 
     Returns:
@@ -25,9 +26,11 @@ def submit_monetization():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_all_monetizations():
     """
     Handles GET /leave-monetizations — retrieves a paginated list of all leave monetizations.
+    ADMIN and DIVISION_PERSONNEL only.
     Accepts query params: page (default 1), limit (default 10).
 
     Returns:
@@ -44,9 +47,11 @@ def get_all_monetizations():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_monetization_by_id(monetization_id: int):
     """
     Handles GET /leave-monetizations/<id> — retrieves a single leave monetization by ID.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         monetization_id (int): The primary key from the URL.
@@ -62,10 +67,11 @@ def get_monetization_by_id(monetization_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_monetizations_by_employee(employee_id: int):
     """
     Handles GET /leave-monetizations/employee/<employee_id> — retrieves all leave
-    monetizations for a specific employee.
+    monetizations for a specific employee. ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         employee_id (int): The employee's primary key from the URL.
@@ -81,10 +87,11 @@ def get_monetizations_by_employee(employee_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
-@require_auth
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def delete_monetization(monetization_id: int):
     """
     Handles DELETE /leave-monetizations/<id> — soft-deletes a leave monetization.
+    ADMIN and DIVISION_PERSONNEL only.
     Reverses VL and SL balance deductions unless already RETURNED or DISAPPROVED.
 
     Parameters:

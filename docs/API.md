@@ -319,7 +319,192 @@ Get a single user account by ID.
 
 ---
 
+### PATCH `/users/<id>/role`
+
+Change a user's role. Protected against downgrading the last active ADMIN account.
+
+**Headers** — `Authorization: Bearer <admin-token>`
+
+**Body**
+
+```json
+{ "role": "DIVISION_PERSONNEL" }
+```
+
+> `role`: `ADMIN` | `DIVISION_PERSONNEL` | `TEACHING_PERSONNEL`
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "message": "Role updated to DIVISION_PERSONNEL",
+  "data": { ...user }
+}
+```
+
+> Returns `409` if this is the last active ADMIN account and the new role is not ADMIN.
+
+---
+
+### PATCH `/users/<id>/deactivate`
+
+Deactivate a user account — the user can no longer log in but the record is preserved.
+Protected against deactivating the last active ADMIN account.
+
+**Headers** — `Authorization: Bearer <admin-token>`
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "message": "Account deactivated successfully",
+  "data": { ...user }
+}
+```
+
+> Returns `409` if this is the last active ADMIN account.
+
+---
+
+### PATCH `/users/<id>/activate`
+
+Reactivate a previously deactivated user account.
+
+**Headers** — `Authorization: Bearer <admin-token>`
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "message": "Account activated successfully",
+  "data": { ...user }
+}
+```
+
+---
+
+### DELETE `/users/<id>`
+
+Permanently delete a user account. The linked employee record is **not** affected.
+Protected against deleting the last ADMIN account.
+
+**Headers** — `Authorization: Bearer <admin-token>`
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "message": "User account 'jdelacruz' deleted permanently"
+}
+```
+
+> Returns `409` if this is the last ADMIN account.
+
+---
+
+### PATCH `/users/<id>/reset-password`
+
+Reset a user's password. The new password is bcrypt-hashed before storing.
+
+**Headers** — `Authorization: Bearer <admin-token>`
+
+**Body**
+
+```json
+{ "new_password": "NewSecurePass123" }
+```
+
+> Minimum 8 characters.
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "message": "Password reset successfully"
+}
+```
+
+---
+
 ## Employees
+
+### GET `/employees/my-school`
+
+Returns a paginated list of employees from the current user's school. Available to all authenticated roles.
+
+- **TEACHING_PERSONNEL** — always scoped to their own school; `school_id` query param is ignored.
+- **ADMIN / DIVISION_PERSONNEL** — defaults to their own linked school. Pass `?school_id=<id>` to query any school.
+
+**Headers** — `Authorization: Bearer <token>`
+
+**Query Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `school_id` | int | current user's school | School to query _(ADMIN / DIVISION only)_ |
+| `page` | int | 1 | Page number |
+| `limit` | int | 10 | Records per page |
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "school": { "id": 3, "name": "Agudo E/S" },
+  "count": 10,
+  "total": 42,
+  "page": 1,
+  "limit": 10,
+  "data": [ ...employees ]
+}
+```
+
+---
+
+### GET `/employees/my-school/search`
+
+Searches employees within the current user's school by keyword. Available to all authenticated roles.
+
+- **TEACHING_PERSONNEL** — always scoped to their own school; `school_id` query param is ignored.
+- **ADMIN / DIVISION_PERSONNEL** — defaults to their own linked school. Pass `?school_id=<id>` to search any school.
+
+**Headers** — `Authorization: Bearer <token>`
+
+**Query Parameters**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | ✅ | Keyword to match against first name, last name, employee number, leave card number, or email |
+| `school_id` | int | ❌ | School to search in _(ADMIN / DIVISION only; defaults to own school)_ |
+| `page` | int | ❌ | Page number (default `1`) |
+| `limit` | int | ❌ | Records per page (default `10`) |
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "school": { "id": 3, "name": "Agudo E/S" },
+  "count": 2,
+  "total": 2,
+  "page": 1,
+  "limit": 10,
+  "data": [ ...employees ]
+}
+```
+
+**Response** `400` — query param missing
+
+```json
+{ "statusCode": 400, "message": "query parameter is required" }
+```
+
+---
 
 ### POST `/employees`
 
@@ -697,6 +882,44 @@ Manually credit leave days to an employee's balance. Accepts **any active leave 
 }
 ```
 
+### POST `/leave-credits/forwarded-balance`
+
+Post a forwarded balance credit for a specific leave type at the start of a given year. Appears as the **first entry** in the leave card running balance timeline for that year. Idempotent — calling again with a different amount updates the existing record instead of inserting a duplicate.
+
+**Body**
+
+```json
+{
+  "employee_id": 1,
+  "leave_type_id": 1,
+  "amount": 15.375,
+  "year": 2026,
+  "remarks": "Forwarded VL balance from 2025"
+}
+```
+
+> `remarks`: optional.
+
+**Response** `201` (created) or `200` (updated existing record)
+
+```json
+{
+  "statusCode": 201,
+  "message": "Forwarded balance of 15.375 day(s) for VL year 2026 posted successfully",
+  "data": { ...transaction }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `employee_id` | FK to employees |
+| `leave_type_id` | FK to leave_types — any active leave type |
+| `amount` | Forwarded balance in days (must be > 0) |
+| `year` | Calendar year; credit is posted on `YYYY-01-01` |
+| `remarks` | Optional notes |
+
+The ledger record is inserted with `source_type = FORWARDED_BALANCE` and `transaction_date = YYYY-01-01`. A cascading balance recalculation is triggered automatically.
+
 ---
 
 ## Leave Applications
@@ -1003,6 +1226,19 @@ Get all leave applications for an employee in a given calendar year. Results are
   "employee": { "id": 1, "first_name": "Juan", "last_name": "Dela Cruz", "employee_number": "EMP-2024-0001" },
   "year": 2026,
   "count": 2,
+  "forwarded_balances": [
+    {
+      "id": 10,
+      "transaction_number": "TXN-A1B2C3D4",
+      "leave_type_id": 1,
+      "leave_type_code": "VL",
+      "leave_type_name": "Vacation Leave",
+      "amount": 15.375,
+      "transaction_date": "2026-01-01",
+      "balance_snapshot_after": 15.375,
+      "remarks": "Forwarded VL balance from 2025"
+    }
+  ],
   "data": [
     {
       "id": 1,
@@ -1033,6 +1269,41 @@ Get all leave applications for an employee in a given calendar year. Results are
       "leave_dates": [ "..." ]
     }
   ]
+}
+```
+
+> `forwarded_balances` is an empty array `[]` when no forwarded balance has been posted for the year.
+
+---
+
+### GET `/leave-applications/my-school`
+
+Returns a paginated list of leave applications for all employees in the current user's school, ordered by date filed descending. **Excludes CTO and VSC.** Available to all authenticated roles.
+
+- **TEACHING_PERSONNEL** — always scoped to their own school; `school_id` query param is ignored.
+- **ADMIN / DIVISION_PERSONNEL** — defaults to their own linked school. Pass `?school_id=<id>` to query any school.
+
+**Headers** — `Authorization: Bearer <token>`
+
+**Query Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `school_id` | int | current user's school | School to query _(ADMIN / DIVISION only)_ |
+| `page` | int | 1 | Page number |
+| `limit` | int | 10 | Records per page |
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "school": { "id": 3, "name": "Agudo E/S" },
+  "count": 10,
+  "total": 55,
+  "page": 1,
+  "limit": 10,
+  "data": [ ...leave applications with embedded dates ]
 }
 ```
 
@@ -1127,6 +1398,7 @@ Paginated search with optional filters. All filters are optional and combinable.
 | `date_to` | string | `2026-06-30` | Upper bound of `date_filed` (YYYY-MM-DD) |
 | `status` | string | `FOR APPROVAL` | Filter by application status |
 | `leave_type_code` | string | `VL` | Filter by leave type code |
+| `school_id` | int | `3` | Filter by school / division |
 | `page` | int | `1` | Page number (default `1`) |
 | `limit` | int | `10` | Records per page (default `10`) |
 
@@ -1995,6 +2267,196 @@ Submit a new leave monetization. Validates VL/SL balance and deducts immediately
 {
   "statusCode": 400,
   "message": "Insufficient VL balance. Available: 8.0, Requested: 10.0"
+}
+```
+
+---
+
+---
+
+## Undertime / Tardiness Deductions
+
+Deducts accumulated undertime and tardiness points from a **NON_TEACHING** employee's Vacation Leave balance. ADMIN only for write operations.
+
+---
+
+### POST `/undertime-tardiness`
+
+Creates a new undertime/tardiness VL deduction. Only applicable to `NON_TEACHING` employees.
+
+**Headers** — `Authorization: Bearer <admin-token>`
+
+**Body**
+
+```json
+{
+  "employee_id": 5,
+  "undertime_points": 0.5,
+  "tardiness_points": 0.25,
+  "deduction_date": "2026-03-31",
+  "remarks": "March 2026 — accumulated tardiness and undertime"
+}
+```
+
+> `remarks` is optional. `undertime_points` and `tardiness_points` must be non-negative numbers.  
+> `total_points = undertime_points + tardiness_points` is deducted from VL.
+
+**Response** `201`
+
+```json
+{
+  "statusCode": 201,
+  "message": "Undertime/tardiness deduction created and VL balance updated",
+  "data": {
+    "id": 1,
+    "application_number": "UTD-A1B2C3D4",
+    "employee_id": 5,
+    "first_name": "Pedro",
+    "last_name": "Reyes",
+    "employee_number": "EMP-2024-0005",
+    "undertime_points": 0.5,
+    "tardiness_points": 0.25,
+    "total_points": 0.75,
+    "vl_deducted": 0.75,
+    "deduction_date": "2026-03-31",
+    "remarks": "March 2026 — accumulated tardiness and undertime",
+    "is_deleted": 0,
+    "created_at": "2026-07-02T10:00:00"
+  }
+}
+```
+
+**Response** `400` — employee is TEACHING
+
+```json
+{ "statusCode": 400, "message": "Undertime/tardiness deductions are only applicable to NON_TEACHING employees" }
+```
+
+---
+
+### GET `/undertime-tardiness`
+
+Paginated list of all active deductions, ordered by `deduction_date` descending.
+
+**Query Params** — `page` (default `1`), `limit` (default `10`)
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "count": 10,
+  "total": 42,
+  "page": 1,
+  "limit": 10,
+  "data": [ ...deductions ]
+}
+```
+
+---
+
+### GET `/undertime-tardiness/search`
+
+Searches by application number, employee first/last name, or employee number.
+
+**Query Params**
+
+| Param | Required | Description |
+|---|---|---|
+| `query` | ✅ | Keyword to match |
+| `page` | ❌ | Page number (default `1`) |
+| `limit` | ❌ | Records per page (default `10`) |
+
+**Response** `200` — same shape as paginated list
+
+---
+
+### GET `/undertime-tardiness/filter`
+
+Filters by date range, year, or employee.
+
+**Query Params**
+
+| Param | Type | Description |
+|---|---|---|
+| `year` | int | Calendar year of `deduction_date` |
+| `date_from` | string | Lower bound of `deduction_date` (YYYY-MM-DD) |
+| `date_to` | string | Upper bound of `deduction_date` (YYYY-MM-DD) |
+| `employee_id` | int | Filter by specific employee |
+| `page` | int | Page number (default `1`) |
+| `limit` | int | Records per page (default `10`) |
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "count": 3,
+  "total": 3,
+  "page": 1,
+  "limit": 10,
+  "filters": { "year": 2026, "employee_id": 5 },
+  "data": [ ...deductions ]
+}
+```
+
+---
+
+### GET `/undertime-tardiness/<id>`
+
+Get a single deduction by ID.
+
+**Response** `200`
+
+```json
+{ "statusCode": 200, "data": { ...deduction } }
+```
+
+---
+
+### DELETE `/undertime-tardiness/<id>`
+
+Soft-deletes the deduction (`is_deleted = 1`) and removes the corresponding VL DEBIT from the ledger, restoring the balance. ADMIN only.
+
+**Response** `200`
+
+```json
+{ "statusCode": 200, "message": "Deduction deleted and VL balance restored" }
+```
+
+**Response** `409` — already deleted
+
+```json
+{ "statusCode": 409, "message": "Deduction has already been deleted" }
+```
+
+---
+
+### Running balance integration
+
+When calling `GET /leave-applications/employee/<id>/year/<year>`, the response now includes an `undertime_tardiness_deductions` array alongside `forwarded_balances`. Each item carries `balance_after` — the VL balance immediately after that deduction was applied — computed from the same interleaved timeline as leave applications.
+
+```json
+{
+  "statusCode": 200,
+  "employee": { ... },
+  "year": 2026,
+  "count": 5,
+  "forwarded_balances": [ ... ],
+  "undertime_tardiness_deductions": [
+    {
+      "id": 1,
+      "application_number": "UTD-A1B2C3D4",
+      "undertime_points": 0.5,
+      "tardiness_points": 0.25,
+      "total_points": 0.75,
+      "vl_deducted": 0.75,
+      "deduction_date": "2026-03-31",
+      "remarks": "March 2026",
+      "balance_after": 14.25
+    }
+  ],
+  "data": [ ...leave applications with running balance ]
 }
 ```
 

@@ -1001,6 +1001,7 @@ class ServiceCreditApplication(BaseModel):
             f"""SELECT vb.id AS credit_balance_id,
                        vb.original_balance,
                        vb.remaining_balance,
+                       vb.remarks AS balance_remarks,
                        sca.id AS service_credit_application_id,
                        sca.application_number AS credit_application_number,
                        sca.hours_rendered,
@@ -1014,11 +1015,11 @@ class ServiceCreditApplication(BaseModel):
                        so.activity_name,
                        so.date_of_activity
                 FROM {balance_table} vb
-                JOIN service_credit_applications sca ON sca.id = vb.service_credit_application_id
-                JOIN special_orders so ON so.id = sca.special_order_id
+                LEFT JOIN service_credit_applications sca ON sca.id = vb.service_credit_application_id
+                LEFT JOIN special_orders so ON so.id = sca.special_order_id
                 LEFT JOIN employees uploader ON uploader.id = sca.uploaded_by
                 WHERE vb.employee_id = %s
-                ORDER BY sca.id ASC""",
+                ORDER BY vb.id ASC""",
             [employee_id]
         )
 
@@ -1032,23 +1033,27 @@ class ServiceCreditApplication(BaseModel):
 
         pool = "OLD" if "old" in balance_table else "NEW"  # determine credit pool from table name
 
-        sca_ids = [c["service_credit_application_id"] for c in credits]  # collect all SCA IDs
-        credit_balance_id_map = {  # map: credit_balance_id -> service_credit_application_id
+        sca_ids = [  # collect only non-NULL SCA IDs (conversion entries have no SCA)
+            c["service_credit_application_id"] for c in credits
+            if c["service_credit_application_id"] is not None
+        ]
+        credit_balance_id_map = {  # map: credit_balance_id -> service_credit_application_id (may be None)
             c["credit_balance_id"]: c["service_credit_application_id"] for c in credits
         }
         credit_balance_ids = list(credit_balance_id_map.keys())  # IDs of the credit balance rows
 
-        sca_dates_map = {sid: [] for sid in sca_ids}  # init per-SCA participation dates map
-        sca_placeholders = ", ".join(["%s"] * len(sca_ids))  # build IN clause placeholders
-        date_rows = fetch_query(  # fetch all participation dates for these service credit applications
-            f"""SELECT service_credit_application_id, date
-                FROM service_credit_dates
-                WHERE service_credit_application_id IN ({sca_placeholders})
-                ORDER BY date ASC""",
-            sca_ids
-        )
-        for dr in (date_rows or []):  # group dates under their parent SCA ID
-            sca_dates_map[dr["service_credit_application_id"]].append(str(dr["date"]))
+        sca_dates_map = {sid: [] for sid in sca_ids}  # init per-SCA participation dates map (only non-NULL SCAs)
+        if sca_ids:  # only query dates if there are real SCA-linked credits
+            sca_placeholders = ", ".join(["%s"] * len(sca_ids))  # build IN clause placeholders
+            date_rows = fetch_query(  # fetch all participation dates for these service credit applications
+                f"""SELECT service_credit_application_id, date
+                    FROM service_credit_dates
+                    WHERE service_credit_application_id IN ({sca_placeholders})
+                    ORDER BY date ASC""",
+                sca_ids
+            )
+            for dr in (date_rows or []):  # group dates under their parent SCA ID
+                sca_dates_map[dr["service_credit_application_id"]].append(str(dr["date"]))
 
         # Fetch all deduction log entries for this pool and these specific credit balance IDs
         deduction_logs = []  # list of (credit_balance_id, leave_application_id, amount_deducted)

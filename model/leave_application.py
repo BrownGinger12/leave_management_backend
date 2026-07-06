@@ -711,13 +711,16 @@ class LeaveApplication(BaseModel):
           AM   → full-day leaves (refund 0.5) and AM half-day leaves (refund 0.5)
           PM   → full-day leaves (refund 0.5) and PM half-day leaves (refund 0.5)
 
-        Balance credit rules mirror the deduction rules:
+        Refund eligibility — only these leave types are refunded:
+          VL, SPL, FL, WL, PR, CTO
+          All other leave types (SL, VSC, SLBT, ML, PL, OL, etc.) are skipped.
+
+        Balance credit rules for eligible types:
           NONE            → skip (no balance was deducted)
-          SELF (non-CTO)  → credit own leave type
+          SELF (VL/SPL/WL/CTO) → credit own leave type
           SELF (CTO)      → credit CTO ledger
-          SELF (SL+VSC)   → credit VSC ledger (SL was funded by VSC)
-          CHARGED_TO_VL   → credit both FL and VL
-          CHARGED_TO_VSC  → credit VSC
+          CHARGED_TO_VL   → credit both FL and VL (FL leave)
+          CHARGED_TO_VSC  → credit VSC (PR leave)
 
         Parameters:
             holiday_date (str): The holiday date in YYYY-MM-DD format.
@@ -751,12 +754,17 @@ class LeaveApplication(BaseModel):
             vsc_type = fetch_query("SELECT id FROM leave_types WHERE code = 'VSC'", [])  # fetch VSC type once
             vsc_type_id = vsc_type[0]["id"] if vsc_type else None  # VSC leave type ID
 
+            REFUNDABLE_CODES = {"VL", "SPL", "FL", "WL", "PR", "CTO"}  # only these leave types are eligible for holiday refund
+
             for row in (rows or []):  # process each overlapping leave application
                 application_id = row["application_id"]  # leave application primary key
                 employee_id = row["employee_id"]  # employee being refunded
                 leave_type_id = row["leave_type_id"]  # leave type of the application
                 code = row["leave_type_code"]  # short leave code (VL, SL, CTO, etc.)
                 balance_type = row["balance_type"]  # SELF, CHARGED_TO_VL, CHARGED_TO_VSC, NONE
+
+                if code not in REFUNDABLE_CODES:  # skip leave types not eligible for holiday refund
+                    continue  # SL, VSC, SLBT, ML, PL, etc. are not refunded
 
                 already_refunded = fetch_query(  # idempotency check: skip if already processed for this date
                     "SELECT id FROM leave_refunded_dates WHERE leave_application_id = %s AND holiday_date = %s LIMIT 1",
@@ -1238,18 +1246,22 @@ class LeaveApplication(BaseModel):
     @staticmethod
     def get_by_employee_and_year(employee_id: int, year: int) -> dict:
         """
-        Retrieves all leave applications for a specific employee in a given calendar year,
-        each enriched with individual leave dates, a computed deduction, and a running
-        balance_after that behaves like an Excel ledger column — reversals zero out
-        the deduction and cascade the correction forward to all subsequent rows.
+        Retrieves all leave applications for a specific employee in a given calendar year
+        with running VL/SL balances computed directly from leave_credit_transactions.
+        Does NOT trust balance_snapshot_after stored in the DB — it recomputes running
+        balances by walking the ledger rows ordered by (transaction_date ASC, id ASC)
+        from the opening balance (derived by backtracking from current cached balance).
+        This guarantees the balance_after on each leave application, UT deduction, and
+        cross-type VL/SL columns are always consistent with the actual ledger.
 
         Parameters:
             employee_id (int): The employee's primary key.
             year (int): The calendar year to filter by (e.g. 2026).
 
         Returns:
-            dict: statusCode 200 with a list of applications (ASC by date) each containing
-                  deduction and balance_after fields, or 404 if the employee is not found.
+            dict: statusCode 200 with leave applications annotated with deduction,
+                  balance_after, vl_balance_after, sl_balance_after; plus forwarded_balances
+                  and undertime_tardiness_deductions. 404 if employee not found.
         """
         try:
             employee = fetch_query(  # verify the employee exists
@@ -1259,7 +1271,8 @@ class LeaveApplication(BaseModel):
             if not employee:  # employee not found
                 return {"statusCode": 404, "message": "Employee not found"}
 
-            rows = fetch_query(  # fetch non-CTO/VSC applications in chronological order for running balance
+            # --- Leave applications for this year (non-CTO/VSC) sorted by date filed ---
+            rows = fetch_query(
                 """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name, lt.balance_type
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
@@ -1270,194 +1283,250 @@ class LeaveApplication(BaseModel):
                    ORDER BY la.date_filed ASC, la.id ASC""",
                 [employee_id, year]
             )
+            enriched = LeaveApplication._enrich_with_dates(rows or [])  # attach leave_dates, start_date, end_date, total_days
 
-            enriched = LeaveApplication._enrich_with_dates(rows or [])  # attach dates and derived fields
-
-            # Query total refunded days per application from leave_refunded_dates
-            all_app_ids = [app["id"] for app in enriched]  # collect all app IDs for this year
-            refunded_per_app = {}  # app_id -> total holiday-refunded days
+            # Attach refunded_days and effective_days (net days after holiday refunds)
+            all_app_ids = [app["id"] for app in enriched]  # collect all app IDs
+            refunded_per_app = {}  # app_id -> total refunded days
             if all_app_ids:  # only query if there are applications
-                app_placeholders = ", ".join(["%s"] * len(all_app_ids))  # build IN clause
-                refund_rows = fetch_query(  # sum refunded amounts grouped by application
+                ph = ", ".join(["%s"] * len(all_app_ids))  # build IN clause placeholders
+                refund_rows = fetch_query(
                     f"""SELECT leave_application_id, SUM(amount_refunded) AS total_refunded
-                        FROM leave_refunded_dates
-                        WHERE leave_application_id IN ({app_placeholders})
+                        FROM leave_refunded_dates WHERE leave_application_id IN ({ph})
                         GROUP BY leave_application_id""",
                     all_app_ids
                 )
-                for r in (refund_rows or []):  # build lookup dict from the result
+                for r in (refund_rows or []):  # build app_id -> refunded_days lookup
                     refunded_per_app[r["leave_application_id"]] = float(r["total_refunded"])
+            for app in enriched:  # attach computed fields to each app
+                app["refunded_days"] = round(refunded_per_app.get(app["id"], 0.0), 4)  # days refunded by holidays
+                app["effective_days"] = round(max(0.0, float(app["total_days"] or 0.0) - app["refunded_days"]), 4)  # net chargeable days
 
-            for app in enriched:  # attach refunded_days and effective_days to each app
-                app["refunded_days"] = round(refunded_per_app.get(app["id"], 0.0), 4)  # total days credited back by holiday refunds
-                app["effective_days"] = round(max(0.0, float(app["total_days"] or 0.0) - app["refunded_days"]), 4)  # net days actually charged after holiday refunds
+            REVERSED_STATUSES = {"RETURNED", "DISAPPROVED"}  # statuses where the balance deduction was already reversed
 
-            REVERSED_STATUSES = {"RETURNED", "DISAPPROVED"}  # statuses where the deduction was already restored
-
-            # Resolve VL, SL, and VSC type IDs — VL/SL are always shown; VSC is needed for CHARGED_TO_VSC (PR) apps
+            # --- Resolve VL and SL leave type IDs ---
             vl_type = fetch_query("SELECT id FROM leave_types WHERE code = 'VL'", [])  # look up VL type
-            vl_leave_type_id = vl_type[0]["id"] if vl_type else None  # store VL id or None if not found
             sl_type = fetch_query("SELECT id FROM leave_types WHERE code = 'SL'", [])  # look up SL type
-            sl_leave_type_id = sl_type[0]["id"] if sl_type else None  # store SL id or None if not found
-            vsc_type = fetch_query("SELECT id FROM leave_types WHERE code = 'VSC'", [])  # look up VSC type
-            vsc_leave_type_id = vsc_type[0]["id"] if vsc_type else None  # store VSC id or None if not found
+            vl_leave_type_id = vl_type[0]["id"] if vl_type else None  # VL leave type primary key or None
+            sl_leave_type_id = sl_type[0]["id"] if sl_type else None  # SL leave type primary key or None
 
-            # Determine which SL apps used VSC credits (those deduct from VSC, not SL balance)
-            sl_app_ids = [app["id"] for app in enriched if app["leave_type_code"] == "SL"]  # collect SL app IDs
-            vsc_funded_sl = set()  # set of SL app IDs that deducted from VSC
-            if sl_app_ids:  # only query if there are SL apps this year
-                sl_placeholders = ", ".join(["%s"] * len(sl_app_ids))  # build IN clause
-                vsc_log_rows = fetch_query(  # check which SL apps have a vsc_deduction_log entry
-                    f"SELECT DISTINCT leave_application_id FROM vsc_deduction_log WHERE leave_application_id IN ({sl_placeholders})",
-                    sl_app_ids
-                )
-                vsc_funded_sl = {row["leave_application_id"] for row in (vsc_log_rows or [])}  # IDs that used VSC
+            # --- UT deductions for this year ---
+            ut_rows = []  # undertime/tardiness deductions (VL debits) for this year
+            if vl_leave_type_id:  # only fetch when VL type exists
+                ut_rows = fetch_query(
+                    """SELECT id, application_number, undertime_points, tardiness_points,
+                              total_points, vl_deducted, deduction_date, remarks
+                       FROM undertime_tardiness_deductions
+                       WHERE employee_id = %s AND YEAR(deduction_date) = %s AND is_deleted = 0
+                       ORDER BY deduction_date ASC, id ASC""",
+                    [employee_id, year]
+                ) or []
 
-            # Map each application to its effective leave_type_id for balance tracking
-            # SELF(CTO/SL-via-VSC)→ VSC/CTO id | SELF(SL/VL/etc.) → own id | CHARGED_TO_VL → VL | CHARGED_TO_VSC → VSC | NONE → None
-            effective_type_map = {}  # app_id -> effective leave_type_id or None
-            for app in enriched:  # iterate to build the map
-                if app["balance_type"] == "NONE":  # no balance deducted for this leave type
-                    effective_type_map[app["id"]] = None  # skip balance tracking
-                elif app["balance_type"] == "CHARGED_TO_VL":  # FL — VL is the actual balance affected
-                    effective_type_map[app["id"]] = vl_leave_type_id  # track VL running balance
-                elif app["balance_type"] == "CHARGED_TO_VSC":  # PR — VSC is the actual balance affected
-                    effective_type_map[app["id"]] = vsc_leave_type_id  # track VSC running balance
-                elif app["leave_type_code"] == "SL" and app["id"] in vsc_funded_sl:  # SL funded by VSC — VSC balance changes, not SL
-                    effective_type_map[app["id"]] = vsc_leave_type_id  # track VSC running balance
-                else:  # SELF — leave type's own balance is affected
-                    effective_type_map[app["id"]] = app["leave_type_id"]  # track own balance
+            # --- Fetch ALL ledger rows for VL and SL for this year, ordered chronologically ---
+            # We intentionally ignore the stored balance_snapshot_after and recompute it fresh
+            # because stored values can be stale if recalculate_ledger_snapshots ran before
+            # a later debit was inserted.
+            def fetch_ledger(lt_id):
+                """Fetch all ledger rows for the given leave type and year, ordered ASC."""
+                if not lt_id:  # skip if leave type doesn't exist
+                    return []
+                return fetch_query(
+                    """SELECT id, transaction_type, amount, source_type, source_id,
+                              transaction_date
+                       FROM leave_credit_transactions
+                       WHERE employee_id = %s AND leave_type_id = %s AND YEAR(transaction_date) = %s
+                       ORDER BY transaction_date ASC, id ASC""",
+                    [employee_id, lt_id, year]
+                ) or []
 
-            # Collect the unique effective leave type IDs that need a balance lookup
-            unique_eff_types = {v for v in effective_type_map.values() if v is not None}  # skip None entries
-            if vl_leave_type_id:  # always include VL — must appear in the leave card VL column even if no VL apps
-                unique_eff_types.add(vl_leave_type_id)
-            if sl_leave_type_id:  # always include SL — must appear in the leave card SL column even if no SL apps
-                unique_eff_types.add(sl_leave_type_id)
+            vl_ledger = fetch_ledger(vl_leave_type_id)  # all VL transactions this year, chronological
+            sl_ledger = fetch_ledger(sl_leave_type_id)  # all SL transactions this year, chronological
 
-            # Fetch current cached balance for each unique effective leave type
-            current_balances = {}  # leave_type_id -> current balance float
-            for lt_id in unique_eff_types:  # one query per unique effective type
-                bal_rows = fetch_query(  # read from the cached balance table
+            # --- Get current cached VL/SL balance and backtrack to find the opening balance ---
+            def get_current_bal(lt_id):
+                """Read current cached balance from employee_leave_balances."""
+                if not lt_id:  # no leave type — return 0
+                    return 0.0
+                b = fetch_query(
                     "SELECT balance FROM employee_leave_balances WHERE employee_id = %s AND leave_type_id = %s",
                     [employee_id, lt_id]
                 )
-                current_balances[lt_id] = float(bal_rows[0]["balance"]) if bal_rows else 0.0  # default to 0
+                return float(b[0]["balance"]) if b else 0.0  # default 0 if no balance record
 
-            # Compute the sum of active (non-reversed) days this year per effective type
-            # Used to back-calculate the balance at the very start of this year
-            active_sums = {lt_id: 0.0 for lt_id in unique_eff_types}  # initialise to zero per type
-            for app in enriched:  # accumulate active deductions for each effective type
-                eff_type = effective_type_map[app["id"]]  # get this app's effective type
-                if eff_type is None:  # NONE type — check for MNT which splits across VL and SL
-                    if app.get("leave_type_code") == "MNT" and app["status"] not in REVERSED_STATUSES:  # MNT deducts from VL and SL separately
-                        mnt_vl = float(app.get("mnt_vl_days") or 0)  # VL portion of this monetization
-                        mnt_sl = float(app.get("mnt_sl_days") or 0)  # SL portion of this monetization
-                        if vl_leave_type_id and mnt_vl > 0:  # add VL days to VL active sum
-                            active_sums[vl_leave_type_id] = active_sums.get(vl_leave_type_id, 0.0) + mnt_vl
-                        if sl_leave_type_id and mnt_sl > 0:  # add SL days to SL active sum
-                            active_sums[sl_leave_type_id] = active_sums.get(sl_leave_type_id, 0.0) + mnt_sl
-                    continue  # no single effective type balance to track
-                if app["status"] not in REVERSED_STATUSES:  # only active apps reduced the balance
-                    active_sums[eff_type] += app["effective_days"]  # use net days after holiday refunds
+            def backtrack(current, ledger):
+                """Walk ledger in REVERSE to undo this year's transactions, yielding the opening balance."""
+                bal = current  # start from current balance (after all this year's transactions)
+                for row in reversed(ledger):  # undo each transaction newest-first
+                    amt = float(row["amount"])  # transaction amount
+                    if row["transaction_type"] == "CREDIT":  # credit was added — undo it
+                        bal = round(bal - amt, 4)
+                    else:  # debit was subtracted — undo it
+                        bal = round(bal + amt, 4)
+                return bal  # result is the balance before any this-year transaction
 
-            # Fetch non-leave-app credits (monthly, manual, system) for this year per effective type
-            # These must be interleaved with apps so credits only count from their transaction date onward
-            year_credits_by_type = {}  # lt_id -> list of {amount, date} in chronological order
-            for lt_id in unique_eff_types:  # one query per unique effective type
-                credit_rows = fetch_query(  # only CREDIT rows; exclude HOLIDAY_REFUND (baked into effective_days) and MONETIZATION DEBITs
-                    """SELECT amount, transaction_date
-                       FROM leave_credit_transactions
-                       WHERE employee_id = %s AND leave_type_id = %s
-                         AND YEAR(transaction_date) = %s
-                         AND transaction_type = 'CREDIT'
-                         AND source_type NOT IN ('LEAVE_APPLICATION', 'HOLIDAY_REFUND')
-                       ORDER BY transaction_date ASC, id ASC""",
-                    [employee_id, lt_id, year]
+            vl_opening = backtrack(get_current_bal(vl_leave_type_id), vl_ledger)  # VL balance entering this year
+            sl_opening = backtrack(get_current_bal(sl_leave_type_id), sl_ledger)  # SL balance entering this year
+
+            # --- Walk the ledger in order, computing running balance and building lookup maps ---
+            # This avoids trusting stored balance_snapshot_after entirely.
+            def compute_snaps(ledger, opening):
+                """
+                Walk ledger rows in chronological order and compute the running balance fresh.
+                Returns (snap_list, app_debit_map, ut_debit_map).
+                snap_list: [(tx_date_str, lid, running_balance_after)] sorted ASC
+                app_debit_map: {source_id -> (lid, running_balance_after, tx_date_str)}
+                ut_debit_map:  {source_id -> running_balance_after}
+                """
+                running = opening  # start from the opening balance for this year
+                snap_list = []  # (tx_date_str, lid, balance_after) for all transactions
+                app_debit_map = {}  # app_id -> (lid, balance_after, tx_date) from LEAVE_APPLICATION DEBITs
+                ut_debit_map = {}   # ut_id  -> balance_after from UNDERTIME_TARDINESS DEBITs
+                for row in ledger:  # iterate in (transaction_date ASC, id ASC) order
+                    amt = float(row["amount"])  # transaction amount
+                    if row["transaction_type"] == "CREDIT":  # credit increases balance
+                        running = round(running + amt, 4)
+                    else:  # DEBIT decreases balance
+                        running = round(running - amt, 4)
+                    tx_date = str(row["transaction_date"])  # string representation for comparison
+                    lid = row["id"]  # ledger row id
+                    snap_list.append((tx_date, lid, running))  # record snapshot at this point
+                    if row["transaction_type"] == "DEBIT":  # build debit lookup maps
+                        if row["source_type"] == "LEAVE_APPLICATION":  # leave app debit
+                            app_debit_map[row["source_id"]] = (lid, running, tx_date)
+                        elif row["source_type"] == "UNDERTIME_TARDINESS":  # UT deduction debit
+                            ut_debit_map[row["source_id"]] = running
+                return snap_list, app_debit_map, ut_debit_map
+
+            vl_snaps, vl_app_debit, vl_ut_debit = compute_snaps(vl_ledger, vl_opening)  # VL computed snapshots and debit maps
+            sl_snaps, sl_app_debit, _            = compute_snaps(sl_ledger, sl_opening)  # SL computed snapshots and debit map
+
+            # --- Helper: balance at or before a given date string ---
+            def bal_at_date(snaps, date_str, opening):
+                """Return the computed balance after the last transaction at or before date_str."""
+                result = opening  # default to opening if no prior transaction on or before date
+                for d, _, snap in snaps:  # snaps are sorted ASC by (tx_date, lid)
+                    if d <= date_str:  # this entry is on or before the target date
+                        result = snap  # update result; a later entry may still qualify
+                    else:
+                        break  # past target date — stop
+                return round(result, 4)
+
+            def bal_before_lid(snaps, target_lid, opening):
+                """Return the computed balance before the ledger entry with id=target_lid (exclusive)."""
+                result = opening  # default to opening if no prior entry
+                for _, lid, snap in snaps:  # snaps sorted ASC
+                    if lid < target_lid:  # strictly before target
+                        result = snap
+                    else:
+                        break  # reached or passed target; stop
+                return round(result, 4)
+
+            # --- Determine which SL apps used VSC credits (deducted from VSC, not SL) ---
+            sl_app_ids = [app["id"] for app in enriched if app["leave_type_code"] == "SL"]  # collect SL app IDs
+            vsc_funded_sl = set()  # SL app IDs whose balance was charged to VSC, not SL
+            if sl_app_ids:  # only query when there are SL apps
+                sl_ph = ", ".join(["%s"] * len(sl_app_ids))  # build IN clause
+                vsc_rows = fetch_query(
+                    f"SELECT DISTINCT leave_application_id FROM vsc_deduction_log WHERE leave_application_id IN ({sl_ph})",
+                    sl_app_ids
                 )
-                year_credits_by_type[lt_id] = [  # normalise to plain dicts with string dates
-                    {"amount": float(r["amount"]), "date": str(r["transaction_date"])}
-                    for r in (credit_rows or [])
-                ]
+                vsc_funded_sl = {r["leave_application_id"] for r in (vsc_rows or [])}  # set of VSC-funded SL app IDs
 
-            # Sum all non-leave-app credits posted in this year per effective type
-            year_credit_sums = {
-                lt_id: sum(c["amount"] for c in year_credits_by_type[lt_id])
-                for lt_id in unique_eff_types
-            }
+            # --- Attach balance fields to each leave application ---
+            for app in enriched:
+                app_id      = app["id"]  # application primary key
+                code        = app["leave_type_code"]  # VL, SL, FL, SPL, etc.
+                bal_type    = app["balance_type"]  # SELF, CHARGED_TO_VL, CHARGED_TO_VSC, NONE
+                status      = app["status"]  # current application status
+                eff_days    = app["effective_days"]  # net days after holiday refunds
+                app_date    = str(app["date_filed"])  # filing date for cross-type balance lookups
+                is_reversed = status in REVERSED_STATUSES  # True if balance was already restored
 
-            # balance_forwarded = the balance each type carried INTO this year (before any this-year transactions)
-            # Derivation: current_balance = all_credits_ever - all_active_debits_ever
-            #             balance_forwarded = current_balance + active_this_year - credits_this_year
-            running_balances = {  # mutable running total per effective type; starts at balance_forwarded
-                lt_id: current_balances[lt_id] + active_sums[lt_id] - year_credit_sums[lt_id]
-                for lt_id in unique_eff_types
-            }
+                if bal_type == "CHARGED_TO_VL" or (bal_type == "SELF" and code == "VL"):
+                    # VL and FL (CHARGED_TO_VL) — both deduct from VL ledger
+                    entry = vl_app_debit.get(app_id)  # find this app's VL debit entry (computed, not from DB snap)
+                    if entry and not is_reversed:  # active app with a VL debit
+                        lid, snap, tx_date = entry  # unpack computed balance and date
+                        app["deduction"]        = -eff_days  # days consumed (negative)
+                        app["balance_after"]    = snap  # computed VL balance after this deduction
+                        app["vl_balance_after"] = snap  # same — this is a VL app
+                        app["sl_balance_after"] = bal_at_date(sl_snaps, tx_date, sl_opening)  # SL at same point
+                    else:  # reversed or no debit found — show balance unchanged
+                        lid     = entry[0] if entry else None  # ledger id of the debit (None if no entry)
+                        tx_date = entry[2] if entry else app_date  # use debit date or fall back to filed date
+                        prior_vl = bal_before_lid(vl_snaps, lid, vl_opening) if lid else bal_at_date(vl_snaps, app_date, vl_opening)
+                        app["deduction"]        = 0.0  # reversed — no net deduction shown
+                        app["balance_after"]    = prior_vl  # VL balance as if this app was never deducted
+                        app["vl_balance_after"] = prior_vl
+                        app["sl_balance_after"] = bal_at_date(sl_snaps, tx_date, sl_opening)
 
-            # Build a merged timeline of credit events and leave-app events, then sort chronologically
-            # Credits use transaction_date; apps use start_date (first leave day) so they land at the right month
-            timeline = []  # list of event dicts to process in date order
+                elif bal_type == "SELF" and code == "SL" and app_id not in vsc_funded_sl:
+                    # SL — deducts from SL ledger
+                    entry = sl_app_debit.get(app_id)  # find this app's SL debit entry
+                    if entry and not is_reversed:  # active SL app with a debit
+                        lid, snap, tx_date = entry
+                        app["deduction"]        = -eff_days  # days consumed
+                        app["balance_after"]    = snap  # computed SL balance after deduction
+                        app["vl_balance_after"] = bal_at_date(vl_snaps, tx_date, vl_opening)  # VL at same point
+                        app["sl_balance_after"] = snap  # same — this is an SL app
+                    else:  # reversed or no debit found
+                        lid     = entry[0] if entry else None
+                        tx_date = entry[2] if entry else app_date
+                        prior_sl = bal_before_lid(sl_snaps, lid, sl_opening) if lid else bal_at_date(sl_snaps, app_date, sl_opening)
+                        app["deduction"]        = 0.0
+                        app["balance_after"]    = prior_sl
+                        app["vl_balance_after"] = bal_at_date(vl_snaps, tx_date, vl_opening)
+                        app["sl_balance_after"] = prior_sl
 
-            for lt_id in unique_eff_types:  # add all credit events for each effective type
-                for credit in year_credits_by_type[lt_id]:  # each non-leave-app credit transaction
-                    timeline.append({
-                        "lt_id": lt_id,          # which effective type this credit affects
-                        "date": credit["date"],   # credit transaction_date (YYYY-MM-DD string)
-                        "is_credit": True,        # flag: this event adds to the running balance
-                        "amount": credit["amount"],  # amount credited
-                        "app": None,              # no application for credit events
-                    })
+                else:
+                    # NONE type, VSC-funded SL, SPL, WL, PR, etc. — no VL/SL debit for this app
+                    app["deduction"]        = -eff_days if not is_reversed else 0.0  # show days consumed or 0 if reversed
+                    app["balance_after"]    = None  # no single balance column for non-VL/SL types
+                    app["vl_balance_after"] = bal_at_date(vl_snaps, app_date, vl_opening)  # VL at filing date
+                    app["sl_balance_after"] = bal_at_date(sl_snaps, app_date, sl_opening)  # SL at filing date
 
-            for app in enriched:  # add ALL leave-application events including NONE-type — needed for VL/SL snapshot
-                eff_type = effective_type_map[app["id"]]  # effective type for balance tracking (None for NONE types)
-                sort_date = str(app["date_filed"])  # sort by filing date to match display and leave card recording order
-                timeline.append({
-                    "lt_id": eff_type,              # effective leave type this app deducts from (None = no deduction)
-                    "date": sort_date,              # chronological position in the leave card
-                    "is_credit": False,             # flag: this event may reduce the running balance
-                    "amount": app["effective_days"],  # net days after holiday refunds (0 if fully refunded)
-                    "app": app,                     # reference to the application dict for updating balance_after
-                })
+            # --- UT deductions with computed balance_after ---
+            ut_deductions = [
+                {
+                    "id":                 ut["id"],  # deduction primary key
+                    "application_number": ut["application_number"],  # UTD-XXXXXXXX reference
+                    "undertime_points":   float(ut["undertime_points"]),  # undertime days
+                    "tardiness_points":   float(ut["tardiness_points"]),  # tardiness days
+                    "total_points":       float(ut["total_points"]),  # total points
+                    "vl_deducted":        float(ut["vl_deducted"]),  # VL days actually deducted
+                    "deduction_date":     str(ut["deduction_date"]),  # effective date
+                    "remarks":            ut.get("remarks"),  # optional notes
+                    "balance_after":      vl_ut_debit.get(ut["id"]),  # computed VL balance after this deduction
+                }
+                for ut in ut_rows
+            ]
 
-            # Sort chronologically; credits land BEFORE apps on the same date
-            # (month-end credits must be available before same-date leave applications are processed)
-            timeline.sort(key=lambda e: (e["date"], 0 if e["is_credit"] else 1))
-
-            # Walk the timeline and assign deduction + balance_after + vl/sl snapshots to each app event
-            for event in timeline:  # process each event in chronological order
-                lt_id = event["lt_id"]  # effective leave type for this event
-                if event["is_credit"]:  # credit event: increase the running balance
-                    running_balances[lt_id] += event["amount"]  # apply the credit
-                else:  # leave-app event: optionally deduct from running balance
-                    app = event["app"]  # the application being processed
-                    total_days = event["amount"]  # days requested
-                    if lt_id is None:  # NONE balance type — MNT splits deduction across VL and SL
-                        if app.get("leave_type_code") == "MNT" and app["status"] not in REVERSED_STATUSES:  # active MNT: apply VL/SL deductions now
-                            mnt_vl = float(app.get("mnt_vl_days") or 0)  # VL portion
-                            mnt_sl = float(app.get("mnt_sl_days") or 0)  # SL portion
-                            if vl_leave_type_id and mnt_vl > 0:  # decrement VL running balance
-                                running_balances[vl_leave_type_id] -= mnt_vl
-                            if sl_leave_type_id and mnt_sl > 0:  # decrement SL running balance
-                                running_balances[sl_leave_type_id] -= mnt_sl
-                        app["deduction"] = -total_days if app["status"] not in REVERSED_STATUSES else 0.0  # negative days or 0 if reversed
-                        app["balance_after"] = None  # no single balance column for MNT
-                    elif app["status"] in REVERSED_STATUSES:  # reversed: balance already restored, no deduction
-                        app["deduction"] = 0.0  # zero deduction shown on the leave card
-                        app["balance_after"] = round(running_balances[lt_id], 4)  # balance unchanged
-                    else:  # active application: deduct from the running total
-                        running_balances[lt_id] -= total_days  # apply the deduction
-                        app["deduction"] = -total_days  # negative = days consumed
-                        app["balance_after"] = round(running_balances[lt_id], 4)  # snapshot after deduction
-                    # Always include VL and SL column snapshots regardless of this application's leave type
-                    app["vl_balance_after"] = round(running_balances.get(vl_leave_type_id, 0.0), 4) if vl_leave_type_id else None  # current VL balance at this point in the leave card
-                    app["sl_balance_after"] = round(running_balances.get(sl_leave_type_id, 0.0), 4) if sl_leave_type_id else None  # current SL balance at this point in the leave card
+            # --- Forwarded balances for this year ---
+            forwarded_rows = fetch_query(
+                """SELECT lct.id, lct.transaction_number, lct.leave_type_id,
+                          lct.amount, lct.transaction_date, lct.balance_snapshot_after, lct.remarks,
+                          lt.code AS leave_type_code, lt.name AS leave_type_name
+                   FROM leave_credit_transactions lct
+                   JOIN leave_types lt ON lt.id = lct.leave_type_id
+                   WHERE lct.employee_id = %s
+                     AND lct.source_type = 'FORWARDED_BALANCE'
+                     AND YEAR(lct.transaction_date) = %s
+                   ORDER BY lct.leave_type_id ASC""",
+                [employee_id, year]
+            )
+            forwarded_balances = [  # normalise Decimal fields to float
+                {**r, "amount": float(r["amount"]), "balance_snapshot_after": float(r["balance_snapshot_after"])}
+                for r in (forwarded_rows or [])
+            ]
 
             return {
                 "statusCode": 200,
-                "employee": employee[0],  # basic employee info for context
-                "year": year,             # the year filter applied
-                "count": len(enriched),   # total applications returned
-                "data": enriched,         # applications in date_filed ASC order
+                "employee": employee[0],                              # basic employee info
+                "year": year,                                         # the year filtered
+                "count": len(enriched),                               # total leave applications returned
+                "forwarded_balances": forwarded_balances,             # FORWARDED_BALANCE credits this year
+                "undertime_tardiness_deductions": ut_deductions,      # VL deductions for UT/tardiness this year
+                "data": enriched,                                     # applications in date_filed ASC order
             }
 
         except Exception as e:  # catch unexpected errors
@@ -1507,10 +1576,10 @@ class LeaveApplication(BaseModel):
         """
         Searches leave applications using optional filters with pagination.
         All filters are optional and combinable. Results are ordered by date_filed DESC.
-        Supported filters: year (of date_filed), date_from, date_to, status, leave_type_code.
+        Supported filters: year (of date_filed), date_from, date_to, status, leave_type_code, school_id.
 
         Parameters:
-            filters (dict): Optional filter keys — year, date_from, date_to, status, leave_type_code.
+            filters (dict): Optional filter keys — year, date_from, date_to, status, leave_type_code, school_id.
             page (int): Page number (default 1).
             limit (int): Records per page (default 10).
 
@@ -1548,6 +1617,10 @@ class LeaveApplication(BaseModel):
             if filters.get("leave_type_code"):  # filter by leave type code
                 conditions.append("lt.code = %s")
                 params.append(filters["leave_type_code"].upper())
+
+            if filters.get("school_id"):  # filter by school (division)
+                conditions.append("e.school_id = %s")
+                params.append(filters["school_id"])
 
             where_clause = "WHERE " + " AND ".join(conditions)  # always has at least the CTO/VSC exclusion
 
@@ -2080,14 +2153,16 @@ class LeaveApplication(BaseModel):
     # --------------------------
 
     @staticmethod
-    def get_paginated(page: int = 1, limit: int = 10) -> dict:
+    def get_paginated(page: int = 1, limit: int = 10, school_id: int = None) -> dict:
         """
         Retrieves a paginated list of all leave applications across all employees,
         ordered by date filed descending. Excludes CTO and VSC types.
+        When school_id is provided, restricts to employees from that school only.
 
         Parameters:
             page (int): Page number to retrieve (default 1).
             limit (int): Number of records per page (default 10).
+            school_id (int): Optional school filter; returns only applications from employees in this school.
 
         Returns:
             dict: statusCode 200 with paginated leave application data.
@@ -2095,37 +2170,54 @@ class LeaveApplication(BaseModel):
         try:
             offset = (page - 1) * limit  # calculate row offset for the requested page
 
-            total_row = fetch_query(  # get count excluding CTO, VSC, and soft-deleted
-                """SELECT COUNT(*) AS total
+            school_filter = "AND e.school_id = %s" if school_id is not None else ""  # build school clause only when needed
+            count_params = [school_id] if school_id is not None else []  # bind school_id for count query if filtering
+            fetch_params = ([school_id] if school_id is not None else []) + [limit, offset]  # bind all params for main query
+
+            total_row = fetch_query(  # get count excluding CTO, VSC, and soft-deleted (optionally filtered by school)
+                f"""SELECT COUNT(*) AS total
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
-                   WHERE lt.code NOT IN ('CTO', 'VSC') AND la.is_deleted = 0""",
-                []
+                   JOIN employees e ON e.id = la.employee_id
+                   WHERE lt.code NOT IN ('CTO', 'VSC') AND la.is_deleted = 0 {school_filter}""",
+                count_params
             )
             total = total_row[0]["total"] if total_row else 0  # extract total count
 
-            rows = fetch_query(  # fetch paginated applications excluding CTO, VSC, and soft-deleted
-                """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
+            rows = fetch_query(  # fetch paginated applications (optionally filtered by school)
+                f"""SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
                           e.first_name, e.last_name, e.employee_number
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
                    JOIN employees e ON e.id = la.employee_id
-                   WHERE lt.code NOT IN ('CTO', 'VSC') AND la.is_deleted = 0
+                   WHERE lt.code NOT IN ('CTO', 'VSC') AND la.is_deleted = 0 {school_filter}
                    ORDER BY la.date_filed DESC, la.id DESC
                    LIMIT %s OFFSET %s""",
-                [limit, offset]
+                fetch_params
             )
+
+            if school_id is not None:  # validate school exists when filtering by school
+                school = fetch_query(  # look up school info for validation and response context
+                    "SELECT id, name FROM schools WHERE id = %s", [school_id]
+                )
+                if not school:  # school not found
+                    return {"statusCode": 404, "message": f"School {school_id} not found"}  # return 404
 
             enriched = LeaveApplication._enrich_with_dates(rows or [])  # attach dates and derived fields
 
-            return {
-                "statusCode": 200,
-                "count": len(enriched),
-                "total": total,
-                "page": page,
-                "limit": limit,
-                "data": enriched,
+            response = {  # build paginated response
+                "statusCode": 200,  # success code
+                "count": len(enriched),  # number of records in this page
+                "total": total,  # total leave applications
+                "page": page,  # current page number
+                "limit": limit,  # records per page
+                "data": enriched,  # leave applications with embedded dates
             }
+
+            if school_id is not None:  # include school context when filtering by school
+                response["school"] = school[0]  # embed school info in the response
+
+            return response  # return the completed response
 
         except Exception as e:  # catch unexpected errors
             return {"statusCode": 500, "message": str(e)}

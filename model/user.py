@@ -76,7 +76,7 @@ class User(BaseModel):
                 if not data.get(field):  # check if field is missing or empty
                     return {"statusCode": 400, "message": f"{field} is required"}  # return 400 if missing
 
-            valid_roles = ("ADMIN", "DIVISION_PERSONNEL", "TEACHING_PERSONNEL")  # allowed role values
+            valid_roles = ("ADMIN", "DIVISION_PERSONNEL", "TEACHING_PERSONNEL", "PAYROLL")  # allowed role values
             if data["role"] not in valid_roles:  # validate the role
                 return {  # return 400 with the allowed values
                     "statusCode": 400,
@@ -284,6 +284,230 @@ class User(BaseModel):
             } if rows else {  # return 404 if not found
                 "statusCode": 404,
                 "message": f"User {user_id} not found",
+            }
+
+        except Exception as e:  # catch unexpected errors
+            return {"statusCode": 500, "message": str(e)}  # return 500 with error detail
+
+    # --------------------------
+    # Update role
+    # --------------------------
+
+    @staticmethod
+    def update_role(user_id: int, data: dict) -> dict:
+        """
+        Updates the role of an existing user account.
+        Cannot change the role of the last remaining ADMIN account.
+
+        Parameters:
+            user_id (int): The primary key of the user to update.
+            data (dict): Must contain 'role' — one of ADMIN, DIVISION_PERSONNEL, TEACHING_PERSONNEL.
+
+        Returns:
+            dict: statusCode 200 with the updated user data, or an error dict.
+        """
+        try:
+            new_role = data.get("role")  # read the new role from the request body
+
+            if not new_role:  # validate that role is present
+                return {"statusCode": 400, "message": "role is required"}  # return 400 if missing
+
+            valid_roles = ("ADMIN", "DIVISION_PERSONNEL", "TEACHING_PERSONNEL", "PAYROLL")  # allowed role values
+            if new_role not in valid_roles:  # validate the role value
+                return {
+                    "statusCode": 400,
+                    "message": f"role must be one of: {', '.join(valid_roles)}",
+                }
+
+            rows = fetch_query(  # verify the user exists and get current role
+                "SELECT id, role FROM users WHERE id = %s", [user_id]
+            )
+
+            if not rows:  # user not found
+                return {"statusCode": 404, "message": f"User {user_id} not found"}  # return 404
+
+            current_role = rows[0]["role"]  # the user's current role before update
+
+            if current_role == "ADMIN" and new_role != "ADMIN":  # downgrading an ADMIN — check last admin guard
+                admin_count_row = fetch_query(  # count remaining active ADMIN accounts
+                    "SELECT COUNT(*) AS cnt FROM users WHERE role = 'ADMIN' AND is_active = 1", []
+                )
+                admin_count = admin_count_row[0]["cnt"] if admin_count_row else 0  # extract count
+
+                if admin_count <= 1:  # this is the only active ADMIN — block the change
+                    return {"statusCode": 409, "message": "Cannot change role — this is the last active ADMIN account"}
+
+            query(  # apply the role update
+                "UPDATE users SET role = %s WHERE id = %s", [new_role, user_id]
+            )
+
+            updated = fetch_query(  # fetch the updated user record for the response
+                """SELECT u.id, u.employee_id, u.username, u.role, u.is_active,
+                          u.last_login_at, u.created_at,
+                          e.first_name, e.last_name, e.employee_number
+                   FROM users u
+                   JOIN employees e ON e.id = u.employee_id
+                   WHERE u.id = %s""",
+                [user_id]
+            )
+
+            return {  # return success response
+                "statusCode": 200,  # 200 OK
+                "message": f"Role updated to {new_role}",  # confirmation message
+                "data": updated[0] if updated else None,  # updated user record
+            }
+
+        except Exception as e:  # catch unexpected errors
+            return {"statusCode": 500, "message": str(e)}  # return 500 with error detail
+
+    # --------------------------
+    # Set account active status (activate / deactivate)
+    # --------------------------
+
+    @staticmethod
+    def set_active(user_id: int, is_active: bool) -> dict:
+        """
+        Activates or deactivates a user account by toggling is_active.
+        Deactivated accounts cannot log in. Cannot deactivate the last active ADMIN account.
+
+        Parameters:
+            user_id (int): The primary key of the user to update.
+            is_active (bool): True to activate, False to deactivate.
+
+        Returns:
+            dict: statusCode 200 with the updated user data, or an error dict.
+        """
+        try:
+            rows = fetch_query(  # verify the user exists and get current role and status
+                "SELECT id, role, is_active FROM users WHERE id = %s", [user_id]
+            )
+
+            if not rows:  # user not found
+                return {"statusCode": 404, "message": f"User {user_id} not found"}  # return 404
+
+            user = rows[0]  # shorthand for the matched record
+
+            if not is_active and user["role"] == "ADMIN":  # deactivating an ADMIN — check last admin guard
+                admin_count_row = fetch_query(  # count remaining active ADMIN accounts
+                    "SELECT COUNT(*) AS cnt FROM users WHERE role = 'ADMIN' AND is_active = 1", []
+                )
+                admin_count = admin_count_row[0]["cnt"] if admin_count_row else 0  # extract count
+
+                if admin_count <= 1:  # this is the only active ADMIN — block the deactivation
+                    return {"statusCode": 409, "message": "Cannot deactivate — this is the last active ADMIN account"}
+
+            active_value = 1 if is_active else 0  # convert bool to tinyint for MySQL
+            action = "activated" if is_active else "deactivated"  # human-readable action name
+
+            query(  # apply the status change
+                "UPDATE users SET is_active = %s WHERE id = %s", [active_value, user_id]
+            )
+
+            updated = fetch_query(  # fetch the updated user record for the response
+                """SELECT u.id, u.employee_id, u.username, u.role, u.is_active,
+                          u.last_login_at, u.created_at,
+                          e.first_name, e.last_name, e.employee_number
+                   FROM users u
+                   JOIN employees e ON e.id = u.employee_id
+                   WHERE u.id = %s""",
+                [user_id]
+            )
+
+            return {  # return success response
+                "statusCode": 200,  # 200 OK
+                "message": f"Account {action} successfully",  # confirmation message
+                "data": updated[0] if updated else None,  # updated user record
+            }
+
+        except Exception as e:  # catch unexpected errors
+            return {"statusCode": 500, "message": str(e)}  # return 500 with error detail
+
+    # --------------------------
+    # Delete account
+    # --------------------------
+
+    @staticmethod
+    def delete(user_id: int) -> dict:
+        """
+        Permanently deletes a user account. Cannot delete the last remaining ADMIN account.
+        The linked employee record is not affected.
+
+        Parameters:
+            user_id (int): The primary key of the user to delete.
+
+        Returns:
+            dict: statusCode 200 on success, or an error dict.
+        """
+        try:
+            rows = fetch_query(  # verify the user exists and get current role
+                "SELECT id, role, username FROM users WHERE id = %s", [user_id]
+            )
+
+            if not rows:  # user not found
+                return {"statusCode": 404, "message": f"User {user_id} not found"}  # return 404
+
+            if rows[0]["role"] == "ADMIN":  # deleting an ADMIN — check last admin guard
+                admin_count_row = fetch_query(  # count remaining ADMIN accounts
+                    "SELECT COUNT(*) AS cnt FROM users WHERE role = 'ADMIN'", []
+                )
+                admin_count = admin_count_row[0]["cnt"] if admin_count_row else 0  # extract count
+
+                if admin_count <= 1:  # this is the only ADMIN — block the deletion
+                    return {"statusCode": 409, "message": "Cannot delete — this is the last ADMIN account"}
+
+            query(  # permanently delete the account
+                "DELETE FROM users WHERE id = %s", [user_id]
+            )
+
+            return {  # return success response
+                "statusCode": 200,  # 200 OK
+                "message": f"User account '{rows[0]['username']}' deleted permanently",  # confirmation
+            }
+
+        except Exception as e:  # catch unexpected errors
+            return {"statusCode": 500, "message": str(e)}  # return 500 with error detail
+
+    # --------------------------
+    # Reset password
+    # --------------------------
+
+    @staticmethod
+    def reset_password(user_id: int, data: dict) -> dict:
+        """
+        Resets the password for a user account. The new password is bcrypt-hashed before storing.
+
+        Parameters:
+            user_id (int): The primary key of the user whose password is being reset.
+            data (dict): Must contain 'new_password'.
+
+        Returns:
+            dict: statusCode 200 on success, or an error dict.
+        """
+        try:
+            new_password = data.get("new_password")  # read the new plain-text password
+
+            if not new_password:  # validate that new_password is present
+                return {"statusCode": 400, "message": "new_password is required"}  # return 400 if missing
+
+            if len(new_password) < 8:  # enforce a minimum password length
+                return {"statusCode": 400, "message": "new_password must be at least 8 characters"}  # return 400
+
+            rows = fetch_query(  # verify the user exists
+                "SELECT id FROM users WHERE id = %s", [user_id]
+            )
+
+            if not rows:  # user not found
+                return {"statusCode": 404, "message": f"User {user_id} not found"}  # return 404
+
+            new_hash = User._hash_password(new_password)  # hash the new password before storing
+
+            query(  # update the stored hash
+                "UPDATE users SET password_hash = %s WHERE id = %s", [new_hash, user_id]
+            )
+
+            return {  # return success response
+                "statusCode": 200,  # 200 OK
+                "message": "Password reset successfully",  # confirmation message
             }
 
         except Exception as e:  # catch unexpected errors

@@ -1,11 +1,13 @@
 from flask import request, jsonify  # import request to read HTTP input and jsonify to build responses
 from model.service_credit_application import ServiceCreditApplication  # import the ServiceCreditApplication model
+from gateway.auth_gateway import require_role  # import role decorator
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def submit_service_credit_application():
     """
     Handles POST /service-credit-applications — submits a new CTO or VSC service credit application.
-    Application is created as PENDING; credit is posted to the ledger only upon approval.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Returns:
         JSON response with the created application and HTTP 201, or an error response.
@@ -23,10 +25,11 @@ def submit_service_credit_application():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
-
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_service_credit_application_by_id(application_id: int):
     """
     Handles GET /service-credit-applications/<id> — retrieves a single application by ID.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         application_id (int): The application's primary key from the URL.
@@ -42,10 +45,12 @@ def get_service_credit_application_by_id(application_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_service_credit_applications_by_employee(employee_id: int):
     """
     Handles GET /service-credit-applications/employee/<employee_id> — retrieves all
     service credit applications submitted by a specific employee.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         employee_id (int): The employee's primary key from the URL.
@@ -61,9 +66,11 @@ def get_service_credit_applications_by_employee(employee_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_all_service_credit_applications():
     """
     Handles GET /service-credit-applications — retrieves a paginated list of all applications.
+    ADMIN and DIVISION_PERSONNEL only.
     Accepts query params: page (default 1), limit (default 10).
 
     Returns:
@@ -80,12 +87,12 @@ def get_all_service_credit_applications():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def search_service_credit_applications_by_special_order(special_order_id: int):
     """
     Handles GET /service-credit-applications/special-order/<special_order_id>/search —
-    searches service credit applications within a specific Special Order by application number,
-    employee number, first name, or last name. Paginated.
-    Accepts query params: q (required), page (default 1), limit (default 10).
+    searches service credit applications within a specific Special Order.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         special_order_id (int): The Special Order's primary key from the URL.
@@ -107,11 +114,12 @@ def search_service_credit_applications_by_special_order(special_order_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_service_credit_applications_by_special_order(special_order_id: int):
     """
     Handles GET /service-credit-applications/special-order/<special_order_id> —
     returns a paginated list of all service credit applications linked to a Special Order.
-    Accepts query params: page (default 1), limit (default 10).
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         special_order_id (int): The Special Order's primary key from the URL.
@@ -132,10 +140,12 @@ def get_service_credit_applications_by_special_order(special_order_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_service_credit_application_by_number(application_number: str):
     """
     Handles GET /service-credit-applications/number/<application_number> — retrieves a
-    single service credit application by its unique application number. No pagination.
+    single service credit application by its unique application number.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         application_number (str): The application number from the URL (e.g. 'SC-A1B2C3D4').
@@ -151,11 +161,12 @@ def get_service_credit_application_by_number(application_number: str):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def search_service_credit_applications():
     """
-    Handles GET /service-credit-applications/search — returns paginated service credit
-    applications filtered by optional query params: special_order_id, type, year,
-    date_from, date_to, page, limit.
+    Handles GET /service-credit-applications/search — paginated service credit applications
+    filtered by optional query params: special_order_id, type, year, date_from, date_to.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Returns:
         JSON response with paginated filtered results and HTTP 200, or an error response.
@@ -179,11 +190,12 @@ def search_service_credit_applications():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_vsc_old_leave_summary_by_employee(employee_id: int):
     """
     Handles GET /service-credit-applications/employee/<employee_id>/vsc-old-leave-summary —
-    returns all VSC service credits earned from activities with date_of_activity < 2024-10-01,
-    each with the VSC leave applications primarily charged to it. No valid_until field.
+    returns all VSC service credits earned from activities before 2024-10-01.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         employee_id (int): The employee's primary key from the URL.
@@ -199,11 +211,12 @@ def get_vsc_old_leave_summary_by_employee(employee_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_vsc_new_leave_summary_by_employee(employee_id: int):
     """
     Handles GET /service-credit-applications/employee/<employee_id>/vsc-new-leave-summary —
-    returns all VSC service credits earned from activities with date_of_activity >= 2024-10-01,
-    each with the VSC leave applications primarily charged to it. No valid_until field.
+    returns all VSC service credits earned from activities on or after 2024-10-01.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         employee_id (int): The employee's primary key from the URL.
@@ -219,12 +232,12 @@ def get_vsc_new_leave_summary_by_employee(employee_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_cto_leave_summary_by_employee(employee_id: int):
     """
     Handles GET /service-credit-applications/employee/<employee_id>/cto-leave-summary —
-    returns all CTO service credit records for the employee, each with the CTO leave
-    applications that were primarily charged to that credit. A leave application is assigned
-    to the credit it deducted the most from; ties are broken by lowest credit_balance_id.
+    returns all CTO service credit records for the employee with nested leave applications.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         employee_id (int): The employee's primary key from the URL.

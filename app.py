@@ -18,6 +18,10 @@ from handler import school_handler  # import school handler functions
 from handler import position_handler  # import position handler functions
 from handler import calendar_event_handler  # import calendar event handler functions
 from handler import leave_monetization_handler  # import leave monetization handler functions
+from handler import undertime_tardiness_handler  # import undertime/tardiness deduction handler functions
+from handler import employee_type_conversion_handler  # import personnel type conversion handler functions
+from handler import dashboard_handler  # import dashboard and analytics handler functions
+from handler import leave_without_pay_handler  # import leave without pay handler functions
 
 load_dotenv()  # load environment variables from .env file into os.environ
 
@@ -71,8 +75,13 @@ app.add_url_rule("/auth/me", view_func=auth_handler.get_me, methods=["GET"])  # 
 # --------------------------
 
 app.add_url_rule("/users", view_func=user_handler.create_user, methods=["POST"])  # create a user account (ADMIN only)
-app.add_url_rule("/users", view_func=user_handler.get_all_users, methods=["GET"])  # list all user accounts (ADMIN only)
+app.add_url_rule("/users", view_func=user_handler.get_all_users, methods=["GET"])  # list all user accounts with pagination (ADMIN only)
 app.add_url_rule("/users/<int:user_id>", view_func=user_handler.get_user_by_id, methods=["GET"])  # get user by ID (ADMIN only)
+app.add_url_rule("/users/<int:user_id>/role", view_func=user_handler.update_user_role, methods=["PATCH"])  # change a user's role (ADMIN only)
+app.add_url_rule("/users/<int:user_id>/deactivate", view_func=user_handler.deactivate_user, methods=["PATCH"])  # deactivate a user account (ADMIN only)
+app.add_url_rule("/users/<int:user_id>/activate", view_func=user_handler.activate_user, methods=["PATCH"])  # reactivate a user account (ADMIN only)
+app.add_url_rule("/users/<int:user_id>", view_func=user_handler.delete_user, methods=["DELETE"])  # permanently delete a user account (ADMIN only)
+app.add_url_rule("/users/<int:user_id>/reset-password", view_func=user_handler.reset_user_password, methods=["PATCH"])  # reset a user's password (ADMIN only)
 
 
 # --------------------------
@@ -84,10 +93,14 @@ app.add_url_rule("/employees", view_func=employee_handler.get_employees_paginate
 app.add_url_rule("/employees/count", view_func=employee_handler.get_employee_count, methods=["GET"])  # total count
 app.add_url_rule("/employees/pages", view_func=employee_handler.get_total_employee_pages, methods=["GET"])  # total pages
 app.add_url_rule("/employees/search", view_func=employee_handler.search_employees, methods=["GET"])  # search employees
+app.add_url_rule("/employees/my-school", view_func=employee_handler.get_employees_by_school, methods=["GET"])  # list employees in the current user's school (all roles; TEACHING auto-scoped, ADMIN/DIVISION can pass ?school_id)
+app.add_url_rule("/employees/my-school/search", view_func=employee_handler.search_employees_by_school, methods=["GET"])  # search employees within the current user's school by keyword (all roles; TEACHING auto-scoped, ADMIN/DIVISION can pass ?school_id)
 app.add_url_rule("/employees/<int:employee_id>", view_func=employee_handler.get_employee_by_id, methods=["GET"])  # get by ID
 app.add_url_rule("/employees/<int:employee_id>", view_func=employee_handler.update_employee, methods=["PUT"])  # update by ID
 app.add_url_rule("/employees/<int:employee_id>", view_func=employee_handler.delete_employee, methods=["DELETE"])  # delete by ID
 app.add_url_rule("/employees/<int:employee_id>/leave-balances", view_func=employee_handler.get_employee_leave_balances, methods=["GET"])  # get leave balances by employee
+app.add_url_rule("/employees/<int:employee_id>/convert-type", view_func=employee_type_conversion_handler.convert_employee_type, methods=["POST"])  # convert employee type TEACHING↔NON_TEACHING with ledger transactions (ADMIN only)
+app.add_url_rule("/employees/<int:employee_id>/conversion-history", view_func=employee_type_conversion_handler.get_conversion_history, methods=["GET"])  # get full conversion history for an employee (ADMIN/DIVISION only)
 app.add_url_rule("/employees/<int:employee_id>/photo", view_func=employee_handler.upload_employee_photo, methods=["POST"])  # upload employee photo
 app.add_url_rule("/uploads/employee_photos/<path:filename>", view_func=employee_handler.get_employee_photo, methods=["GET"])  # serve uploaded employee photo
 
@@ -112,7 +125,8 @@ app.add_url_rule("/leave-credit-transactions/employee/<int:employee_id>/year/<in
 # Leave Credit routes
 # --------------------------
 
-app.add_url_rule("/leave-credits", view_func=leave_credit_handler.credit_leave, methods=["POST"])  # credit VL or SL balance
+app.add_url_rule("/leave-credits", view_func=leave_credit_handler.credit_leave, methods=["POST"])  # credit leave balance via manual adjustment
+app.add_url_rule("/leave-credits/forwarded-balance", view_func=leave_credit_handler.post_forwarded_balance, methods=["POST"])  # post forwarded balance credit for a leave type at year start
 
 
 # --------------------------
@@ -134,6 +148,7 @@ app.add_url_rule("/leave-applications/number/<string:application_number>", view_
 app.add_url_rule("/leave-applications/all", view_func=leave_application_handler.get_all_leave_applications_including_cto_vsc, methods=["GET"])  # list ALL leave applications including CTO and VSC (paginated)
 app.add_url_rule("/leave-applications/cto-vsc", view_func=leave_application_handler.get_all_cto_vsc_leave_applications, methods=["GET"])  # list CTO and VSC leave applications only (paginated)
 app.add_url_rule("/leave-applications/cto-vsc/employee/<int:employee_id>", view_func=leave_application_handler.get_cto_vsc_leave_applications_by_employee, methods=["GET"])  # get CTO/VSC applications by employee
+app.add_url_rule("/leave-applications/my-school", view_func=leave_application_handler.get_leave_applications_by_school, methods=["GET"])  # list leave applications for the current user's school (all roles; TEACHING auto-scoped, ADMIN/DIVISION can pass ?school_id)
 app.add_url_rule("/leave-applications/<int:application_id>", view_func=leave_application_handler.get_leave_application_by_id, methods=["GET"])  # get by ID
 app.add_url_rule("/leave-applications/<int:application_id>", view_func=leave_application_handler.update_leave_application, methods=["PUT"])  # replace leave dates (only when status is FOR HRMO ACTION)
 app.add_url_rule("/leave-applications/<int:application_id>", view_func=leave_application_handler.delete_leave_application, methods=["DELETE"])  # soft-delete; reverses balance if not already returned/disapproved
@@ -150,6 +165,18 @@ app.add_url_rule("/leave-monetizations", view_func=leave_monetization_handler.ge
 app.add_url_rule("/leave-monetizations/<int:monetization_id>", view_func=leave_monetization_handler.get_monetization_by_id, methods=["GET"])  # get by ID
 app.add_url_rule("/leave-monetizations/<int:monetization_id>", view_func=leave_monetization_handler.delete_monetization, methods=["DELETE"])  # soft-delete; reverses balance if not already returned/disapproved
 app.add_url_rule("/leave-monetizations/employee/<int:employee_id>", view_func=leave_monetization_handler.get_monetizations_by_employee, methods=["GET"])  # get all by employee
+
+
+# --------------------------
+# Undertime / Tardiness Deduction routes
+# --------------------------
+
+app.add_url_rule("/undertime-tardiness", view_func=undertime_tardiness_handler.create_undertime_tardiness, methods=["POST"])  # create a deduction (ADMIN only; NON_TEACHING employees only)
+app.add_url_rule("/undertime-tardiness", view_func=undertime_tardiness_handler.get_all_undertime_tardiness, methods=["GET"])  # list all deductions (paginated)
+app.add_url_rule("/undertime-tardiness/search", view_func=undertime_tardiness_handler.search_undertime_tardiness, methods=["GET"])  # search by application number or employee
+app.add_url_rule("/undertime-tardiness/filter", view_func=undertime_tardiness_handler.filter_undertime_tardiness, methods=["GET"])  # filter by year, date range, or employee
+app.add_url_rule("/undertime-tardiness/<int:deduction_id>", view_func=undertime_tardiness_handler.get_undertime_tardiness_by_id, methods=["GET"])  # get single deduction by ID
+app.add_url_rule("/undertime-tardiness/<int:deduction_id>", view_func=undertime_tardiness_handler.delete_undertime_tardiness, methods=["DELETE"])  # soft-delete and reverse VL debit (ADMIN only)
 
 
 # --------------------------
@@ -186,6 +213,27 @@ app.add_url_rule("/service-credit-applications/employee/<int:employee_id>/cto-le
 app.add_url_rule("/service-credit-applications/employee/<int:employee_id>/vsc-old-leave-summary", view_func=service_credit_application_handler.get_vsc_old_leave_summary_by_employee, methods=["GET"])  # get VSC credits (activity < 2024-10-01) with their primary leave applications
 app.add_url_rule("/service-credit-applications/employee/<int:employee_id>/vsc-new-leave-summary", view_func=service_credit_application_handler.get_vsc_new_leave_summary_by_employee, methods=["GET"])  # get VSC credits (activity >= 2024-10-01) with their primary leave applications
 app.add_url_rule("/service-credit-applications/employee/<int:employee_id>", view_func=service_credit_application_handler.get_service_credit_applications_by_employee, methods=["GET"])  # get all by employee
+
+
+# --------------------------
+# Dashboard / Analytics routes (ADMIN and DIVISION_PERSONNEL)
+# --------------------------
+
+app.add_url_rule("/dashboard/teaching/on-leave", view_func=dashboard_handler.get_teaching_on_leave, methods=["GET"])  # list of TEACHING employees on leave on a specific date
+app.add_url_rule("/dashboard/non-teaching/on-leave", view_func=dashboard_handler.get_non_teaching_on_leave, methods=["GET"])  # list of NON_TEACHING employees on leave on a specific date
+app.add_url_rule("/dashboard/teaching/on-leave/count", view_func=dashboard_handler.get_teaching_on_leave_count, methods=["GET"])  # count of TEACHING employees on leave + total headcount for a specific date
+app.add_url_rule("/dashboard/non-teaching/on-leave/count", view_func=dashboard_handler.get_non_teaching_on_leave_count, methods=["GET"])  # count of NON_TEACHING employees on leave + total headcount for a specific date
+app.add_url_rule("/dashboard/teaching/leave-type-breakdown", view_func=dashboard_handler.get_teaching_leave_type_breakdown, methods=["GET"])  # monthly leave type breakdown for TEACHING with optional date range
+app.add_url_rule("/dashboard/non-teaching/leave-type-breakdown", view_func=dashboard_handler.get_non_teaching_leave_type_breakdown, methods=["GET"])  # monthly leave type breakdown for NON_TEACHING with optional date range
+app.add_url_rule("/dashboard/pending-applications", view_func=dashboard_handler.get_latest_pending_applications, methods=["GET"])  # latest 5 pending (FOR HRMO ACTION) leave applications across all types
+
+
+# --------------------------
+# Leave Without Pay routes (PAYROLL only)
+# --------------------------
+
+app.add_url_rule("/leave-without-pay/teaching", view_func=leave_without_pay_handler.get_teaching_leave_without_pay, methods=["GET"])  # paginated LWOP dates for TEACHING employees; supports ?date_from, ?date_to, ?page, ?limit
+app.add_url_rule("/leave-without-pay/non-teaching", view_func=leave_without_pay_handler.get_non_teaching_leave_without_pay, methods=["GET"])  # paginated LWOP dates for NON_TEACHING employees; supports ?date_from, ?date_to, ?page, ?limit
 
 
 if __name__ == "__main__":

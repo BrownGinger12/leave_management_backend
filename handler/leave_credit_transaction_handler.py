@@ -1,11 +1,13 @@
 from flask import request, jsonify  # import request to read query params and jsonify to build responses
 from model.leave_credit_transaction import LeaveCreditTransaction  # import the model
+from gateway.auth_gateway import require_role  # import role decorator
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_transactions_by_employee(employee_id: int):
     """
     Handles GET /leave-credit-transactions/employee/<employee_id> — retrieves paginated
-    ledger transactions for a specific employee.
+    ledger transactions for a specific employee. ADMIN and DIVISION_PERSONNEL only.
     Accepts query params: page (default 1), limit (default 10).
 
     Parameters:
@@ -27,10 +29,12 @@ def get_transactions_by_employee(employee_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL", "PAYROLL")
 def get_transactions_by_employee_and_year(employee_id: int, year: int):
     """
     Handles GET /leave-credit-transactions/employee/<employee_id>/year/<year> — retrieves
     all ledger transactions for a specific employee in the given calendar year.
+    ADMIN, DIVISION_PERSONNEL, and PAYROLL only.
 
     Parameters:
         employee_id (int): The employee's primary key from the URL.

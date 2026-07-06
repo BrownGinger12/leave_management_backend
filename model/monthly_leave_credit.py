@@ -196,14 +196,18 @@ class MonthlyLeaveCredit(BaseModel):
         """
         Retrieves all monthly VL/SL credit records for a specific employee in a given
         calendar year, each enriched with its linked ledger transaction data.
+        Overrides the stored balance_snapshot_after with a recomputed value by walking
+        the full VL/SL ledger in (transaction_date ASC, id ASC) order — so the balance
+        shown for each monthly credit reflects the true running balance at that point,
+        including any leave application debits that fall between monthly credits.
 
         Parameters:
             employee_id (int): The employee's primary key.
             year (int): The calendar year to filter by (e.g. 2026).
 
         Returns:
-            dict: statusCode 200 with a list of monthly credits each including ledger data,
-                  or 404 if the employee is not found.
+            dict: statusCode 200 with a list of monthly credits each including ledger data
+                  and a recomputed balance_snapshot_after, or 404 if not found.
         """
         try:
             employee = fetch_query(  # verify the employee exists
@@ -232,12 +236,61 @@ class MonthlyLeaveCredit(BaseModel):
                 [employee_id, year]
             )
 
+            if not rows:  # no credits yet — return empty list
+                return {
+                    "statusCode": 200,
+                    "employee": employee[0],
+                    "year": year,
+                    "count": 0,
+                    "data": [],
+                }
+
+            # --- Recompute balance_snapshot_after for each monthly credit row ---
+            # The stored value can be stale if a leave application debit was inserted
+            # after the monthly credit and recalculate_ledger_snapshots was not re-run.
+            # We fetch the full ledger for each leave type and recompute from scratch.
+
+            def fetch_full_ledger(lt_id):
+                """Fetch all ledger rows for the given employee and leave type, ordered chronologically."""
+                return fetch_query(
+                    """SELECT id, transaction_type, amount
+                       FROM leave_credit_transactions
+                       WHERE employee_id = %s AND leave_type_id = %s
+                       ORDER BY transaction_date ASC, id ASC""",
+                    [employee_id, lt_id]
+                ) or []
+
+            def build_balance_map(lt_id):
+                """Walk the full ledger for lt_id and return {ledger_id: running_balance_after}."""
+                ledger = fetch_full_ledger(lt_id)  # all transactions ever for this leave type
+                running = 0.0  # start from zero (before forwarded balance)
+                bal_map = {}  # ledger_id -> computed running balance after that row
+                for row in ledger:  # iterate chronologically
+                    amt = float(row["amount"])  # transaction amount
+                    if row["transaction_type"] == "CREDIT":  # credit adds to balance
+                        running = round(running + amt, 4)
+                    else:  # DEBIT subtracts from balance
+                        running = round(running - amt, 4)
+                    bal_map[row["id"]] = running  # record balance after this row
+                return bal_map
+
+            # Build per-leave-type balance maps (one full-ledger walk per unique leave type)
+            unique_lt_ids = {r["leave_type_id"] for r in rows}  # collect unique leave type IDs in result
+            bal_maps = {lt_id: build_balance_map(lt_id) for lt_id in unique_lt_ids}  # compute map per type
+
+            result_rows = []  # will hold rows with overridden balance_snapshot_after
+            for r in rows:  # override balance_snapshot_after with the recomputed value
+                computed = bal_maps.get(r["leave_type_id"], {}).get(r["transaction_id"])  # look up computed balance
+                row_dict = dict(r)  # copy row to avoid mutating the original
+                row_dict["balance_snapshot_after"] = round(computed, 4) if computed is not None else float(r["balance_snapshot_after"])
+                result_rows.append(row_dict)  # add to result list
+
             return {  # return results
                 "statusCode": 200,  # success code
                 "employee": employee[0],  # basic employee info for context
                 "year": year,  # the year filter applied
-                "count": len(rows),  # total records returned
-                "data": rows if rows else [],  # list of monthly credits with embedded ledger data
+                "count": len(result_rows),  # total records returned
+                "data": result_rows,  # monthly credits with recomputed balance_snapshot_after
             }
 
         except Exception as e:  # catch unexpected errors

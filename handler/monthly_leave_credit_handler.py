@@ -1,11 +1,13 @@
 from flask import request, jsonify  # import request to read HTTP input and jsonify to build responses
 from model.monthly_leave_credit import MonthlyLeaveCredit  # import the MonthlyLeaveCredit model
+from gateway.auth_gateway import require_role  # import role decorator
 
 
+@require_role("ADMIN")
 def credit_monthly_leave():
     """
     Handles POST /monthly-leave-credits — credits a monthly VL or SL amount to an employee.
-    Rejects duplicates for the same employee, leave type, year, and month.
+    ADMIN only. Rejects duplicates for the same employee, leave type, year, and month.
 
     Returns:
         JSON response with the created credit record and HTTP 201, or an error response.
@@ -23,11 +25,12 @@ def credit_monthly_leave():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL", "PAYROLL")
 def get_monthly_credits_by_employee_and_year(employee_id: int, year: int):
     """
     Handles GET /monthly-leave-credits/employee/<employee_id>/year/<year> — retrieves
-    all monthly VL/SL credits for a specific employee in the given calendar year,
-    each enriched with its linked ledger transaction data.
+    all monthly VL/SL credits for a specific employee in the given calendar year.
+    ADMIN, DIVISION_PERSONNEL, and PAYROLL only.
 
     Parameters:
         employee_id (int): The employee's primary key from the URL.

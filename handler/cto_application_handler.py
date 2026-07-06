@@ -1,11 +1,13 @@
 from flask import request, jsonify  # import request to read HTTP input and jsonify to build responses
 from model.cto_application import CtoApplication  # import the CtoApplication model
+from gateway.auth_gateway import require_role  # import role decorator
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def submit_cto_application():
     """
     Handles POST /cto-applications — submits a new CTO application.
-    Application is created as PENDING; CTO credit is posted only upon approval.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Returns:
         JSON response with the created application and HTTP 201, or an error response.
@@ -23,11 +25,11 @@ def submit_cto_application():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN")
 def decide_cto_application():
     """
     Handles POST /cto-applications/decide — processes an APPROVED or REJECTED decision.
-    On APPROVED: posts a CREDIT to the ledger and updates the employee's CTO balance cache.
-    On REJECTED: records the rejection on the application record.
+    ADMIN only. On APPROVED: posts a CREDIT to the ledger and updates the CTO balance cache.
 
     Returns:
         JSON response with the updated application and HTTP 200, or an error response.
@@ -45,9 +47,11 @@ def decide_cto_application():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_cto_application_by_id(application_id: int):
     """
     Handles GET /cto-applications/<id> — retrieves a single CTO application by ID.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         application_id (int): The CTO application's primary key from the URL.
@@ -63,9 +67,11 @@ def get_cto_application_by_id(application_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_cto_applications_by_employee(employee_id: int):
     """
     Handles GET /cto-applications/employee/<employee_id> — retrieves all CTO applications for an employee.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         employee_id (int): The employee's primary key from the URL.
@@ -81,9 +87,11 @@ def get_cto_applications_by_employee(employee_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_all_cto_applications():
     """
     Handles GET /cto-applications — retrieves a paginated list of all CTO applications.
+    ADMIN and DIVISION_PERSONNEL only.
     Accepts query params: page (default 1), limit (default 10).
 
     Returns:

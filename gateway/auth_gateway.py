@@ -112,3 +112,39 @@ def require_role(*roles):
         return decorated  # return the wrapped function
 
     return decorator  # return the decorator
+
+
+def check_school_access(target_employee_id: int):
+    """
+    For TEACHING_PERSONNEL: verifies the current user belongs to the same school as
+    the target employee. ADMIN and DIVISION_PERSONNEL always pass unrestricted.
+
+    Parameters:
+        target_employee_id (int): The employee whose record is being accessed.
+
+    Returns:
+        tuple | None: A (jsonify, 403) response tuple if access is denied, or None if permitted.
+    """
+    from gateway.mysql_gateway import fetch_query  # import here to avoid circular imports at module load
+
+    role = g.current_user.get("role")  # read the role from the decoded JWT payload
+
+    if role in ("ADMIN", "DIVISION_PERSONNEL"):  # these roles have unrestricted cross-school access
+        return None  # no restriction
+
+    current_emp_id = g.current_user.get("employee_id")  # the logged-in user's linked employee ID
+
+    current_rows = fetch_query(  # look up the current user's school
+        "SELECT school_id FROM employees WHERE id = %s", [current_emp_id]
+    )
+    target_rows = fetch_query(  # look up the target employee's school
+        "SELECT school_id FROM employees WHERE id = %s", [target_employee_id]
+    )
+
+    if not current_rows or not target_rows:  # one or both employees not found
+        return jsonify({"statusCode": 403, "message": "Access denied"}), 403  # deny safely
+
+    if current_rows[0]["school_id"] != target_rows[0]["school_id"]:  # different schools
+        return jsonify({"statusCode": 403, "message": "You can only access records from your own school"}), 403  # deny
+
+    return None  # same school — access granted

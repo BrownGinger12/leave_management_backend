@@ -179,13 +179,15 @@ class Employee(BaseModel):
     # --------------------------
 
     @staticmethod
-    def get_paginated(page: int = 1, limit: int = 10) -> dict:
+    def get_paginated(page: int = 1, limit: int = 10, school_id: int = None) -> dict:
         """
         Retrieves a paginated list of employees ordered by ID.
+        When school_id is provided, filters to that school only and includes school info in the response.
 
         Parameters:
             page (int): The page number to retrieve (default 1).
             limit (int): The number of records per page (default 10).
+            school_id (int): Optional school filter; returns only employees from this school.
 
         Returns:
             dict: statusCode 200 with data list and pagination info, or 404 if no records found.
@@ -193,24 +195,48 @@ class Employee(BaseModel):
         try:
             offset = (page - 1) * limit  # calculate the row offset for the current page
 
-            rows = fetch_query(  # fetch employees for the requested page
-                "SELECT * FROM employees ORDER BY id LIMIT %s OFFSET %s",
-                [limit, offset]
-            )
+            if school_id is not None:  # filter by school when school_id is provided
+                school = fetch_query(  # verify the school exists
+                    "SELECT id, name FROM schools WHERE id = %s", [school_id]
+                )
+                if not school:  # school not found
+                    return {"statusCode": 404, "message": f"School {school_id} not found"}  # return 404
+
+                total_row = fetch_query(  # count employees in this school
+                    "SELECT COUNT(*) AS total FROM employees WHERE school_id = %s", [school_id]
+                )
+                total = total_row[0]["total"] if total_row else 0  # extract total count
+
+                rows = fetch_query(  # fetch paginated employees for this school
+                    """SELECT * FROM employees
+                       WHERE school_id = %s
+                       ORDER BY last_name ASC, first_name ASC
+                       LIMIT %s OFFSET %s""",
+                    [school_id, limit, offset]
+                )
+            else:  # no school filter — return all employees
+                total = Employee.get_total()  # get global employee count for pagination metadata
+                rows = fetch_query(  # fetch employees for the requested page
+                    "SELECT * FROM employees ORDER BY id LIMIT %s OFFSET %s",
+                    [limit, offset]
+                )
 
             if not rows:  # check if any employees were returned
                 return {"statusCode": 404, "message": "No employees found"}  # return 404 if empty
 
-            total = Employee.get_total()  # get total employee count for pagination metadata
-
-            return {  # return paginated response
+            response = {  # build paginated response
                 "statusCode": 200,  # success code
                 "count": len(rows),  # number of records in this page
-                "total": total,  # total number of employees in the database
+                "total": total,  # total number of employees
                 "page": page,  # current page number
                 "limit": limit,  # records per page
                 "data": [Employee._with_signed_photo(row) for row in rows],  # the employee records, with signed photo URLs
             }
+
+            if school_id is not None:  # include school context when filtering by school
+                response["school"] = school[0]  # embed school info in the response
+
+            return response  # return the completed response
 
         except Exception as e:  # catch unexpected errors
             return {"statusCode": 500, "message": str(e)}  # return 500 with error detail
@@ -365,14 +391,17 @@ class Employee(BaseModel):
     # --------------------------
 
     @staticmethod
-    def search(query_str: str, page: int = 1, limit: int = 10) -> dict:
+    def search(query_str: str, page: int = 1, limit: int = 10, school_id: int = None) -> dict:
         """
-        Searches employees by first name, last name, employee number, or email.
+        Searches employees by first name, last name, employee number, leave card number, or email.
+        When school_id is provided, restricts results to that school and includes school info and
+        pagination totals in the response.
 
         Parameters:
             query_str (str): The search keyword to match against.
             page (int): The page number to retrieve (default 1).
             limit (int): The number of results per page (default 10).
+            school_id (int): Optional school filter; restricts search to this school only.
 
         Returns:
             dict: statusCode 200 with matching employee records, or 404 if none found.
@@ -381,7 +410,48 @@ class Employee(BaseModel):
             offset = (page - 1) * limit  # calculate row offset for pagination
             like = f"%{query_str}%"  # wrap the search term with wildcards for LIKE matching
 
-            rows = fetch_query(  # search employees across name, numbers, and email fields
+            if school_id is not None:  # school-scoped search
+                school = fetch_query(  # verify the school exists
+                    "SELECT id, name FROM schools WHERE id = %s", [school_id]
+                )
+                if not school:  # school not found
+                    return {"statusCode": 404, "message": f"School {school_id} not found"}  # return 404
+
+                total_row = fetch_query(  # count matching employees in this school
+                    """SELECT COUNT(*) AS total FROM employees
+                       WHERE school_id = %s
+                         AND (first_name LIKE %s OR last_name LIKE %s
+                              OR employee_number LIKE %s OR leave_card_number LIKE %s
+                              OR email LIKE %s)""",
+                    [school_id, like, like, like, like, like]
+                )
+                total = total_row[0]["total"] if total_row else 0  # extract total count
+
+                rows = fetch_query(  # fetch matching employees for this school
+                    """SELECT * FROM employees
+                       WHERE school_id = %s
+                         AND (first_name LIKE %s OR last_name LIKE %s
+                              OR employee_number LIKE %s OR leave_card_number LIKE %s
+                              OR email LIKE %s)
+                       ORDER BY last_name ASC, first_name ASC
+                       LIMIT %s OFFSET %s""",
+                    [school_id, like, like, like, like, like, limit, offset]
+                )
+
+                if not rows:  # no matches
+                    return {"statusCode": 404, "school": school[0], "message": "No employees found matching the query"}
+
+                return {  # return school-scoped results with pagination metadata
+                    "statusCode": 200,  # success code
+                    "school": school[0],  # school info for context
+                    "count": len(rows),  # number of records in this page
+                    "total": total,  # total matching employees in this school
+                    "page": page,  # current page number
+                    "limit": limit,  # records per page
+                    "data": [Employee._with_signed_photo(row) for row in rows],  # employees with signed photo URLs
+                }
+
+            rows = fetch_query(  # global search across all employees
                 """SELECT * FROM employees
                    WHERE first_name LIKE %s OR last_name LIKE %s
                       OR employee_number LIKE %s OR leave_card_number LIKE %s
@@ -469,6 +539,10 @@ class Employee(BaseModel):
 
     # --------------------------
     # Get leave balances by employee
+    # --------------------------
+
+    # --------------------------
+    # Get leave balances
     # --------------------------
 
     @staticmethod

@@ -1,10 +1,12 @@
 from flask import request, jsonify  # import request to read HTTP input and jsonify to build responses
 from model.special_order import SpecialOrder  # import the SpecialOrder model
+from gateway.auth_gateway import require_role  # import role decorator
 
 
+@require_role("ADMIN")
 def create_special_order():
     """
-    Handles POST /special-orders — creates a new Special Order.
+    Handles POST /special-orders — creates a new Special Order. ADMIN only.
     Returns 409 if the Special Order number already exists.
 
     Returns:
@@ -23,9 +25,11 @@ def create_special_order():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_special_order_by_id(special_order_id: int):
     """
     Handles GET /special-orders/<id> — retrieves a single Special Order by ID.
+    ADMIN and DIVISION_PERSONNEL only.
 
     Parameters:
         special_order_id (int): The Special Order's primary key from the URL.
@@ -41,11 +45,12 @@ def get_special_order_by_id(special_order_id: int):
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def search_special_orders():
     """
     Handles GET /special-orders/search?q=<keyword> — searches Special Orders by
     special_order number or activity_name using a partial match. Paginated.
-    Accepts query params: q (required), page (default 1), limit (default 10).
+    ADMIN and DIVISION_PERSONNEL only.
 
     Returns:
         JSON response with paginated matching Special Orders and HTTP 200, or an error response.
@@ -62,11 +67,11 @@ def search_special_orders():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def filter_special_orders():
     """
     Handles GET /special-orders/filter — filters Special Orders by optional year and/or
-    date range on date_of_activity. All params are optional and combinable. Paginated.
-    Accepts query params: year, date_from, date_to, page (default 1), limit (default 10).
+    date range on date_of_activity. ADMIN and DIVISION_PERSONNEL only.
 
     Returns:
         JSON response with paginated filtered Special Orders and HTTP 200, or an error response.
@@ -88,9 +93,11 @@ def filter_special_orders():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_all_special_orders():
     """
     Handles GET /special-orders — retrieves a paginated list of all Special Orders.
+    ADMIN and DIVISION_PERSONNEL only.
     Accepts query params: page (default 1), limit (default 10).
 
     Returns:
