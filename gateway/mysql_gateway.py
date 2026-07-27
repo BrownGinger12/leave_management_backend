@@ -74,6 +74,47 @@ def query_insert(sql, params=None):
             conn.close()
 
 
+def get_next_sequence(year: int, seq_type: str) -> int:
+    """
+    Atomically increments and returns the next sequence number for a given year and type.
+    Uses LAST_INSERT_ID() within a single connection so the value is race-condition-free.
+
+    Parameters:
+        year (int): Calendar year for the sequence (e.g. 2026).
+        seq_type (str): Sequence category — 'LEAVE' or 'CTO'.
+
+    Returns:
+        int: The next sequence number (1-based, resets each year).
+    """
+    conn = None  # connection placeholder
+    cursor = None  # cursor placeholder
+    try:
+        conn = get_connection()  # open one connection for the entire atomic operation
+        cursor = conn.cursor()  # create a cursor on this connection
+
+        cursor.execute(  # ensure the row exists for this year/type (no-op if already present)
+            "INSERT IGNORE INTO application_number_sequences (year, seq_type, last_seq) VALUES (%s, %s, 0)",
+            [year, seq_type]
+        )
+
+        cursor.execute(  # atomically increment using LAST_INSERT_ID — connection-scoped, race-safe
+            "UPDATE application_number_sequences SET last_seq = LAST_INSERT_ID(last_seq + 1) WHERE year = %s AND seq_type = %s",
+            [year, seq_type]
+        )
+
+        cursor.execute("SELECT LAST_INSERT_ID() AS seq")  # read back the value assigned to this connection
+        row = cursor.fetchone()  # fetch the single result row
+        return int(row["seq"]) if row and row.get("seq") else 1  # return the sequence or 1 as fallback
+
+    except Exception:  # catch any DB error and fall back gracefully
+        return 1  # return 1 so the caller can still produce a number
+    finally:
+        if cursor:  # always close cursor
+            cursor.close()
+        if conn:  # always close connection
+            conn.close()
+
+
 def recalculate_ledger_snapshots(employee_id: int, leave_type_id: int) -> float:
     """
     Recomputes balance_snapshot_after for every ledger row for a given employee and

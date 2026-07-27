@@ -20,8 +20,8 @@ class School:
             dict: statusCode 200 with the list of school records.
         """
         try:
-            rows = fetch_query(  # fetch all schools ordered alphabetically
-                "SELECT id, name FROM schools ORDER BY name ASC", []
+            rows = fetch_query(  # fetch all schools with their type, ordered alphabetically
+                "SELECT id, name, school_type FROM schools ORDER BY name ASC", []
             )
 
             return {  # return success response

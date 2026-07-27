@@ -12,10 +12,12 @@ class LeaveWithoutPay(BaseModel):
 
     @staticmethod
     def get_paginated(employee_type: str, date_from: str, date_to: str,
-                      page: int = 1, limit: int = 10) -> dict:
+                      page: int = 1, limit: int = 10,
+                      school_type: str = None) -> dict:
         """
         Returns a paginated list of leave-without-pay dates for employees of
         the given type within the specified date range.
+        Optionally filters by school_type (REGULAR, IU, or SHS).
         Each row represents one LWOP date tied to a leave application.
 
         Parameters:
@@ -24,6 +26,7 @@ class LeaveWithoutPay(BaseModel):
             date_to (str): End of the date range (YYYY-MM-DD).
             page (int): Page number (1-indexed, default 1).
             limit (int): Records per page (default 10).
+            school_type (str): Optional — filter by school classification ('REGULAR', 'IU', 'SHS').
 
         Returns:
             dict: statusCode 200 with paginated LWOP records, or an error dict.
@@ -33,7 +36,18 @@ class LeaveWithoutPay(BaseModel):
             limit = max(limit, 1)  # ensure limit is at least 1
             offset = (page - 1) * limit  # compute SQL offset from page number
 
-            base_where = """
+            valid_school_types = ("REGULAR", "IU", "SHS")  # accepted school_type values
+            if school_type and school_type.upper() not in valid_school_types:  # validate if provided
+                return {"statusCode": 400, "message": f"school_type must be one of: {', '.join(valid_school_types)}"}
+
+            school_type_filter = ""  # additional filter fragment; empty when not filtering by school_type
+            params = [employee_type, date_from, date_to]  # base query parameters
+
+            if school_type:  # append school_type condition when provided
+                school_type_filter = "AND s.school_type = %s"  # filter on the schools table
+                params.append(school_type.upper())  # bind the normalised value
+
+            base_where = f"""
                 FROM leave_application_dates lad
                 JOIN leave_applications la ON la.id = lad.leave_application_id
                 JOIN employees e ON e.id = la.employee_id
@@ -45,9 +59,8 @@ class LeaveWithoutPay(BaseModel):
                   AND e.is_active = 1
                   AND e.employee_type = %s
                   AND lad.leave_date BETWEEN %s AND %s
+                  {school_type_filter}
             """  # shared WHERE clause reused for both count and data queries
-
-            params = [employee_type, date_from, date_to]  # shared query parameters
 
             total_row = fetch_query(  # count total matching LWOP date rows
                 f"SELECT COUNT(*) AS total {base_where}",
@@ -55,11 +68,13 @@ class LeaveWithoutPay(BaseModel):
             )
             total = int(total_row[0]["total"]) if total_row else 0  # cast to int
 
-            rows = fetch_query(  # fetch paginated LWOP records
+            rows = fetch_query(  # fetch paginated LWOP records with school_type included
                 f"""SELECT e.id AS employee_id,
                            e.first_name, e.last_name, e.employee_number,
                            e.employee_type, e.position,
+                           e.implementing_unit,
                            s.name AS school_name,
+                           s.school_type,
                            la.id AS application_id,
                            la.application_number,
                            la.status,
@@ -81,7 +96,8 @@ class LeaveWithoutPay(BaseModel):
 
             return {  # return paginated response
                 "statusCode": 200,  # success code
-                "employee_type": employee_type,  # type filter applied
+                "employee_type": employee_type,  # employee type filter applied
+                "school_type": school_type.upper() if school_type else None,  # school type filter applied (or None)
                 "date_from": date_from,  # range start
                 "date_to": date_to,  # range end
                 "page": page,  # current page number

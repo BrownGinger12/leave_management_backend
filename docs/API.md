@@ -2674,6 +2674,247 @@ Get all active leave types.
 
 ---
 
+## Manual Balance Adjustments
+
+Manual DEBIT (deduction) or CREDIT of VL/SL balances for NON_TEACHING employees. All endpoints require **ADMIN** role.
+
+Every adjustment is posted to the ledger (`source_type = MANUAL_DEDUCTION`) and recalculates all balance snapshots immediately. Deletions reverse the ledger entry and restore the balance.
+
+Adjustments appear in `GET /leave-applications/employee/<id>/year/<year>` under `manual_adjustments`.
+
+---
+
+### POST `/balance-deductions`
+
+Creates a manual balance adjustment (deduction or credit) for a NON_TEACHING employee. Only VL and SL are allowed.
+
+**Request Body**
+
+```json
+{
+  "employee_id": 5,
+  "leave_type_id": 1,
+  "transaction_type": "DEBIT",
+  "amount": 2.5,
+  "deduction_date": "2026-07-18",
+  "remarks": "Excess leave adjustment"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `employee_id` | int | Yes | Target employee (NON_TEACHING only) |
+| `leave_type_id` | int | Yes | Must be VL or SL |
+| `transaction_type` | string | Yes | `DEBIT` (deduct) or `CREDIT` (add) |
+| `amount` | float | Yes | Days to adjust (must be > 0) |
+| `deduction_date` | string | Yes | Effective date (YYYY-MM-DD) |
+| `remarks` | string | No | Optional notes visible in the leave card |
+
+**Response** `201`
+
+```json
+{
+  "statusCode": 201,
+  "message": "VL deduction of 2.5 day(s) applied successfully",
+  "balance_before": 15.0,
+  "balance_after": 12.5,
+  "data": {
+    "id": 1,
+    "deduction_number": "26-000001",
+    "employee_id": 5,
+    "leave_type_id": 1,
+    "transaction_type": "DEBIT",
+    "amount": 2.5,
+    "deduction_date": "2026-07-18",
+    "remarks": "Excess leave adjustment",
+    "is_deleted": 0,
+    "created_at": "2026-07-18T10:00:00",
+    "first_name": "Juan",
+    "last_name": "Dela Cruz",
+    "employee_number": "EMP-000005",
+    "leave_type_code": "VL",
+    "leave_type_name": "Vacation Leave"
+  }
+}
+```
+
+**Validation errors:**
+- Employee is TEACHING → `400 "Manual balance adjustments are only applicable to NON_TEACHING employees"`
+- Leave type is not VL or SL → `400 "Only Vacation Leave (VL) and Sick Leave (SL) can be manually adjusted"`
+- `transaction_type` not DEBIT or CREDIT → `400`
+
+---
+
+### GET `/balance-deductions`
+
+Paginated list of all manual balance adjustments (VL and SL only). Optional `?employee_id=` filter.
+
+**Query Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `page` | int | 1 | Page number |
+| `limit` | int | 10 | Records per page |
+| `employee_id` | int | — | Filter to a specific employee |
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "count": 10,
+  "total": 42,
+  "page": 1,
+  "limit": 10,
+  "data": [ ...adjustment records... ]
+}
+```
+
+---
+
+### GET `/balance-deductions/history`
+
+Searchable, filterable history of manual balance adjustments. Always restricted to VL and SL. All params optional and combinable.
+
+**Query Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `query` | string | Searches employee first name, last name, employee number, or deduction number |
+| `date_from` | string | Earliest deduction date (YYYY-MM-DD) |
+| `date_to` | string | Latest deduction date (YYYY-MM-DD) |
+| `year` | int | Calendar year — ignored if `date_from` or `date_to` is set |
+| `employee_id` | int | Filter to one specific employee |
+| `leave_type_id` | int | Filter to one specific leave type (still restricted to VL/SL) |
+| `page` | int | Default 1 |
+| `limit` | int | Default 10 |
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "count": 2,
+  "total": 2,
+  "page": 1,
+  "limit": 10,
+  "total_pages": 1,
+  "filters": {
+    "query": "dela cruz",
+    "date_from": null,
+    "date_to": null,
+    "year": 2026,
+    "employee_id": null,
+    "leave_type_id": null
+  },
+  "data": [
+    {
+      "id": 1,
+      "deduction_number": "26-000001",
+      "employee_id": 5,
+      "leave_type_id": 1,
+      "transaction_type": "DEBIT",
+      "amount": 2.5,
+      "deduction_date": "2026-07-18",
+      "remarks": "Excess leave adjustment",
+      "is_deleted": 0,
+      "created_at": "2026-07-18T10:00:00",
+      "first_name": "Juan",
+      "last_name": "Dela Cruz",
+      "employee_number": "EMP-000005",
+      "leave_type_code": "VL",
+      "leave_type_name": "Vacation Leave"
+    }
+  ]
+}
+```
+
+`year` is `null` in `filters` when `date_from` or `date_to` is also provided (date range takes precedence).
+
+---
+
+### GET `/balance-deductions/<id>`
+
+Fetches a single manual balance adjustment by primary key.
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "id": 1,
+    "deduction_number": "26-000001",
+    "employee_id": 5,
+    "leave_type_id": 1,
+    "transaction_type": "DEBIT",
+    "amount": 2.5,
+    "deduction_date": "2026-07-18",
+    "remarks": "Excess leave adjustment",
+    "is_deleted": 0,
+    "created_at": "2026-07-18T10:00:00",
+    "first_name": "Juan",
+    "last_name": "Dela Cruz",
+    "employee_number": "EMP-000005",
+    "leave_type_code": "VL",
+    "leave_type_name": "Vacation Leave"
+  }
+}
+```
+
+Returns `404` if not found or already soft-deleted.
+
+---
+
+### DELETE `/balance-deductions/<id>`
+
+Soft-deletes the record, removes the ledger entry, and restores the balance.
+
+**Response** `200`
+
+```json
+{
+  "statusCode": 200,
+  "message": "Deduction deleted and balance restored",
+  "balance_after": 15.0
+}
+```
+
+Returns `404` if not found, `409` if already deleted.
+
+---
+
+### Manual Adjustments in the Leave Card
+
+`GET /leave-applications/employee/<id>/year/<year>` now includes a `manual_adjustments` array. Each entry appears as a line item in the running balance alongside leave applications and UT deductions.
+
+```json
+"manual_adjustments": [
+  {
+    "id": 1,
+    "deduction_number": "26-000001",
+    "leave_type_id": 1,
+    "transaction_type": "DEBIT",
+    "amount": 2.5,
+    "deduction_date": "2026-07-18",
+    "remarks": "Excess leave adjustment",
+    "balance_after": 12.5,
+    "vl_balance_after": 12.5,
+    "sl_balance_after": 10.0
+  }
+]
+```
+
+| Field | Description |
+|---|---|
+| `transaction_type` | `DEBIT` = deduction (balance decreases), `CREDIT` = credit (balance increases) |
+| `balance_after` | Computed balance of the adjusted leave type immediately after this entry |
+| `vl_balance_after` | VL running balance at this point in time |
+| `sl_balance_after` | SL running balance at this point in time |
+| `remarks` | Admin notes — display as the row description in the leave card |
+
+---
+
 ## Error Responses
 
 All endpoints return a consistent error format:

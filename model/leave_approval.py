@@ -181,7 +181,8 @@ class LeaveApproval(BaseModel):
     @staticmethod
     def _post_reversal(employee_id: int, leave_type_id: int, leave_type_code: str,
                        balance_type: str, total_days: float, application_id: int,
-                       start_date: str) -> dict | None:
+                       start_date: str, application_number: str = None,
+                       new_status: str = None) -> dict | None:
         """
         Posts a CREDIT reversal to the ledger when a leave application is RETURNED or DISAPPROVED.
         Cancels the DEBIT that was posted at submission time, restoring the employee's balance.
@@ -197,10 +198,18 @@ class LeaveApproval(BaseModel):
             total_days (float): Number of days to restore (not used for CTO).
             application_id (int): The source leave application ID.
             start_date (str): The first day of the leave (YYYY-MM-DD), same date as the original DEBIT.
+            application_number (str): The application number for the refund remarks (optional).
+            new_status (str): The incoming status — used to customise remarks for DISAPPROVED vs RETURNED.
 
         Returns:
             dict | None: An error dict if reversal fails, None on success.
         """
+        # Build the remarks label based on whether this is a disapproval (refund) or a return
+        if new_status == "DISAPPROVED" and application_number:  # specific refund language for disapprovals
+            _base_remark = f"Refund - Disapproved application {application_number}"  # refund-specific remark
+        else:  # generic reversal remark for RETURNED or unknown status
+            _base_remark = f"Leave returned/disapproved - {leave_type_code} deduction reversed"
+
         if balance_type == "NONE":  # no debit was posted for this leave type
             return None  # nothing to reverse
 
@@ -225,7 +234,7 @@ class LeaveApproval(BaseModel):
                     total_days,                 # days being restored
                     application_id,             # source leave application
                     start_date,                 # same date as original DEBIT
-                    f"Leave returned/disapproved — {leave_type_code} deduction reversed",  # auto remarks
+                    _base_remark,               # disapproval or return remark
                 ]
             )
             if fl_result["statusCode"] != 200:  # check if FL reversal failed
@@ -245,7 +254,7 @@ class LeaveApproval(BaseModel):
                     total_days,                 # days being restored
                     application_id,             # source leave application
                     start_date,                 # same date as original DEBIT
-                    f"Leave returned/disapproved — VL deduction reversed for {leave_type_code}",  # auto remarks
+                    _base_remark + f" (VL charged for {leave_type_code})",  # VL-specific suffix
                 ]
             )
             if vl_result["statusCode"] != 200:  # check if VL reversal failed
@@ -296,7 +305,7 @@ class LeaveApproval(BaseModel):
                 total_days,                  # days being restored
                 application_id,              # source: the returned/disapproved leave application
                 start_date,                  # same date as original DEBIT
-                f"Leave returned/disapproved — {leave_type_code} deduction reversed",  # auto remarks
+                _base_remark,                # disapproval or return remark
             ]
         )
 
@@ -306,6 +315,177 @@ class LeaveApproval(BaseModel):
         recalculate_ledger_snapshots(employee_id, leave_type_id)  # recalculate snapshots after reversal
 
         return None  # reversal posted successfully
+
+    # --------------------------
+    # Restore / re-debit MNT (monetization) VL and SL balances
+    # --------------------------
+
+    @staticmethod
+    def _post_mnt_reversal(employee_id: int, application_id: int, mnt_vl_days: float,
+                           mnt_sl_days: float, date_filed: str,
+                           application_number: str, new_status: str) -> dict | None:
+        """
+        Posts CREDIT reversal entries for a monetization application being returned or disapproved.
+        Monetization debits go directly to VL and SL — so the reversal must credit those same types.
+        Uses source_type MONETIZATION to pair correctly with the original debit entries.
+
+        Parameters:
+            employee_id (int): The employee whose balances are being restored.
+            application_id (int): The leave_applications.id of the monetization record.
+            mnt_vl_days (float): VL days originally deducted (0 if none).
+            mnt_sl_days (float): SL days originally deducted (0 if none).
+            date_filed (str): The monetization's date_filed used as transaction_date.
+            application_number (str): The MN-XXXXXXXX number for audit remarks.
+            new_status (str): RETURNED or DISAPPROVED — used to build the remark label.
+
+        Returns:
+            dict | None: An error dict if any step fails, None on success.
+        """
+        action = "Disapproved" if new_status == "DISAPPROVED" else "Returned"  # human-readable label for remarks
+
+        if mnt_vl_days > 0:  # restore VL only if VL was originally deducted
+            vl_type = fetch_query("SELECT id FROM leave_types WHERE code = 'VL'", [])  # fetch VL leave type
+            if not vl_type:  # VL type not found
+                return {"statusCode": 500, "message": "VL leave type not found in system"}  # return error
+            vl_type_id = vl_type[0]["id"]  # VL leave type ID
+
+            vl_result = query_insert(  # post CREDIT to restore VL balance
+                """INSERT INTO leave_credit_transactions
+                       (transaction_number, employee_id, leave_type_id, transaction_type,
+                        amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+                   VALUES (%s, %s, %s, 'CREDIT', %s, 'MONETIZATION', %s, %s, 0, %s)""",
+                [
+                    LeaveApproval._generate_transaction_number(),  # unique transaction number
+                    employee_id,                                    # employee being restored
+                    vl_type_id,                                     # VL leave type
+                    mnt_vl_days,                                    # VL days being restored
+                    application_id,                                  # source: the monetization record
+                    date_filed,                                     # same date as original debit
+                    f"Refund - {action} monetization {application_number} - VL restored",  # audit remark
+                ]
+            )
+            if vl_result["statusCode"] != 200:  # check if insert failed
+                return vl_result  # return error
+            recalculate_ledger_snapshots(employee_id, vl_type_id)  # update VL balance cache
+
+        if mnt_sl_days > 0:  # restore SL only if SL was originally deducted
+            sl_type = fetch_query("SELECT id FROM leave_types WHERE code = 'SL'", [])  # fetch SL leave type
+            if not sl_type:  # SL type not found
+                return {"statusCode": 500, "message": "SL leave type not found in system"}  # return error
+            sl_type_id = sl_type[0]["id"]  # SL leave type ID
+
+            sl_result = query_insert(  # post CREDIT to restore SL balance
+                """INSERT INTO leave_credit_transactions
+                       (transaction_number, employee_id, leave_type_id, transaction_type,
+                        amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+                   VALUES (%s, %s, %s, 'CREDIT', %s, 'MONETIZATION', %s, %s, 0, %s)""",
+                [
+                    LeaveApproval._generate_transaction_number(),  # unique transaction number
+                    employee_id,                                    # employee being restored
+                    sl_type_id,                                     # SL leave type
+                    mnt_sl_days,                                    # SL days being restored
+                    application_id,                                  # source: the monetization record
+                    date_filed,                                     # same date as original debit
+                    f"Refund - {action} monetization {application_number} - SL restored",  # audit remark
+                ]
+            )
+            if sl_result["statusCode"] != 200:  # check if insert failed
+                return sl_result  # return error
+            recalculate_ledger_snapshots(employee_id, sl_type_id)  # update SL balance cache
+
+        return None  # all reversals posted successfully
+
+    @staticmethod
+    def _post_mnt_redebit(employee_id: int, application_id: int, mnt_vl_days: float,
+                          mnt_sl_days: float, date_filed: str, application_number: str) -> dict | None:
+        """
+        Re-posts DEBIT entries for a monetization being re-activated from RETURNED/DISAPPROVED.
+        Mirrors the original monetization submit logic using MONETIZATION source_type.
+
+        Parameters:
+            employee_id (int): The employee being re-debited.
+            application_id (int): The leave_applications.id of the monetization record.
+            mnt_vl_days (float): VL days to re-deduct (0 if none).
+            mnt_sl_days (float): SL days to re-deduct (0 if none).
+            date_filed (str): The monetization's date_filed used as transaction_date.
+            application_number (str): The MN-XXXXXXXX number for audit remarks.
+
+        Returns:
+            dict | None: An error dict if any step fails, None on success.
+        """
+        if mnt_vl_days > 0:  # re-deduct VL only if VL days exist
+            vl_type = fetch_query("SELECT id FROM leave_types WHERE code = 'VL'", [])  # fetch VL leave type
+            if not vl_type:  # VL type not found
+                return {"statusCode": 500, "message": "VL leave type not found in system"}  # return error
+            vl_type_id = vl_type[0]["id"]  # VL leave type ID
+
+            vl_bal = fetch_query(  # check current VL balance before re-debiting
+                "SELECT balance FROM employee_leave_balances WHERE employee_id = %s AND leave_type_id = %s",
+                [employee_id, vl_type_id]
+            )
+            available_vl = float(vl_bal[0]["balance"]) if vl_bal else 0.0  # current VL balance
+            if available_vl < mnt_vl_days:  # insufficient balance
+                return {
+                    "statusCode": 400,
+                    "message": f"Insufficient VL balance to re-activate. Required: {mnt_vl_days}, Available: {available_vl}",
+                }
+
+            vl_result = query_insert(  # post DEBIT to re-reserve VL balance
+                """INSERT INTO leave_credit_transactions
+                       (transaction_number, employee_id, leave_type_id, transaction_type,
+                        amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+                   VALUES (%s, %s, %s, 'DEBIT', %s, 'MONETIZATION', %s, %s, 0, %s)""",
+                [
+                    LeaveApproval._generate_transaction_number(),  # unique transaction number
+                    employee_id,                                    # employee being debited
+                    vl_type_id,                                     # VL leave type
+                    mnt_vl_days,                                    # VL days re-reserved
+                    application_id,                                  # source: the monetization record
+                    date_filed,                                     # same date as original debit
+                    f"Re-activated monetization {application_number} - VL re-deducted",  # audit remark
+                ]
+            )
+            if vl_result["statusCode"] != 200:  # check if insert failed
+                return vl_result  # return error
+            recalculate_ledger_snapshots(employee_id, vl_type_id)  # update VL balance cache
+
+        if mnt_sl_days > 0:  # re-deduct SL only if SL days exist
+            sl_type = fetch_query("SELECT id FROM leave_types WHERE code = 'SL'", [])  # fetch SL leave type
+            if not sl_type:  # SL type not found
+                return {"statusCode": 500, "message": "SL leave type not found in system"}  # return error
+            sl_type_id = sl_type[0]["id"]  # SL leave type ID
+
+            sl_bal = fetch_query(  # check current SL balance before re-debiting
+                "SELECT balance FROM employee_leave_balances WHERE employee_id = %s AND leave_type_id = %s",
+                [employee_id, sl_type_id]
+            )
+            available_sl = float(sl_bal[0]["balance"]) if sl_bal else 0.0  # current SL balance
+            if available_sl < mnt_sl_days:  # insufficient balance
+                return {
+                    "statusCode": 400,
+                    "message": f"Insufficient SL balance to re-activate. Required: {mnt_sl_days}, Available: {available_sl}",
+                }
+
+            sl_result = query_insert(  # post DEBIT to re-reserve SL balance
+                """INSERT INTO leave_credit_transactions
+                       (transaction_number, employee_id, leave_type_id, transaction_type,
+                        amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+                   VALUES (%s, %s, %s, 'DEBIT', %s, 'MONETIZATION', %s, %s, 0, %s)""",
+                [
+                    LeaveApproval._generate_transaction_number(),  # unique transaction number
+                    employee_id,                                    # employee being debited
+                    sl_type_id,                                     # SL leave type
+                    mnt_sl_days,                                    # SL days re-reserved
+                    application_id,                                  # source: the monetization record
+                    date_filed,                                     # same date as original debit
+                    f"Re-activated monetization {application_number} - SL re-deducted",  # audit remark
+                ]
+            )
+            if sl_result["statusCode"] != 200:  # check if insert failed
+                return sl_result  # return error
+            recalculate_ledger_snapshots(employee_id, sl_type_id)  # update SL balance cache
+
+        return None  # all re-debits posted successfully
 
     # --------------------------
     # Process approval decision
@@ -372,13 +552,16 @@ class LeaveApproval(BaseModel):
             app = application[0]  # shorthand for the application row
             current_status = app["status"]  # the application's status before this decision
             new_status = data["status"]  # the incoming status from the request
-            total_days = float(app["total_days"] or 0.0)  # days in the application
+            total_days = float(app["total_days"] or 0.0)  # days from leave_application_dates (0 for MNT)
+            is_mnt = app["leave_type_code"] == "MNT"  # monetization applications have no date rows
 
             REVERSED_STATUSES = {"RETURNED", "DISAPPROVED"}  # statuses where balance was already restored
 
             # When re-activating from a reversed status, pre-check balance before any writes
             if current_status in REVERSED_STATUSES and new_status not in REVERSED_STATUSES:  # transitioning back to active
-                if app["balance_type"] == "SELF" and app["leave_type_code"] not in ("CTO", "VSC"):  # standard SELF check
+                if is_mnt:  # monetization balance check is handled inside _post_mnt_redebit
+                    pass  # balance checked per-type (VL/SL) inside the helper
+                elif app["balance_type"] == "SELF" and app["leave_type_code"] not in ("CTO", "VSC"):  # standard SELF check
                     bal = fetch_query(  # get the employee's current balance for this leave type
                         "SELECT balance FROM employee_leave_balances WHERE employee_id = %s AND leave_type_id = %s",
                         [app["employee_id"], app["leave_type_id"]]
@@ -424,32 +607,59 @@ class LeaveApproval(BaseModel):
 
             # Transitioning FROM a reversed status TO an active status — re-post debit to re-reserve balance
             if current_status in REVERSED_STATUSES and new_status not in REVERSED_STATUSES:
-                from model.leave_application import LeaveApplication  # local import to avoid circular dependency
-                debit_error = LeaveApplication._post_debit(  # re-deduct the balance so it is reserved again
-                    employee_id=app["employee_id"],
-                    leave_type_id=app["leave_type_id"],
-                    leave_type_code=app["leave_type_code"],
-                    balance_type=app["balance_type"],
-                    total_days=total_days,
-                    application_id=app["id"],
-                    start_date=str(app["start_date"]),  # same start date for correct ledger ordering
-                )
-                if debit_error:  # debit posting failed
-                    return debit_error  # return the error
+                if is_mnt:  # monetization: re-debit VL and/or SL directly
+                    mnt_error = LeaveApproval._post_mnt_redebit(  # re-reserve VL/SL balance for monetization
+                        employee_id=app["employee_id"],
+                        application_id=app["id"],
+                        mnt_vl_days=float(app.get("mnt_vl_days") or 0),  # VL portion of the monetization
+                        mnt_sl_days=float(app.get("mnt_sl_days") or 0),  # SL portion of the monetization
+                        date_filed=str(app["date_filed"]),               # use date_filed as transaction date
+                        application_number=app.get("application_number"),
+                    )
+                    if mnt_error:  # re-debit failed
+                        return mnt_error  # return the error
+                else:  # standard leave types — use generic debit
+                    from model.leave_application import LeaveApplication  # local import to avoid circular dependency
+                    debit_error = LeaveApplication._post_debit(  # re-deduct the balance so it is reserved again
+                        employee_id=app["employee_id"],
+                        leave_type_id=app["leave_type_id"],
+                        leave_type_code=app["leave_type_code"],
+                        balance_type=app["balance_type"],
+                        total_days=total_days,
+                        application_id=app["id"],
+                        start_date=str(app["start_date"]),  # same start date for correct ledger ordering
+                    )
+                    if debit_error:  # debit posting failed
+                        return debit_error  # return the error
 
             # Transitioning FROM an active status TO a reversed status — post credit reversal to restore balance
             elif new_status in REVERSED_STATUSES and current_status not in REVERSED_STATUSES:
-                reversal_error = LeaveApproval._post_reversal(  # restore the employee's balance
-                    employee_id=app["employee_id"],
-                    leave_type_id=app["leave_type_id"],
-                    leave_type_code=app["leave_type_code"],
-                    balance_type=app["balance_type"],
-                    total_days=total_days,
-                    application_id=app["id"],
-                    start_date=str(app["start_date"]),  # same date as the original DEBIT for correct ledger pairing
-                )
-                if reversal_error:  # reversal posting failed
-                    return reversal_error  # return the error
+                if is_mnt:  # monetization: restore VL and/or SL directly
+                    mnt_error = LeaveApproval._post_mnt_reversal(  # restore VL/SL balance for monetization
+                        employee_id=app["employee_id"],
+                        application_id=app["id"],
+                        mnt_vl_days=float(app.get("mnt_vl_days") or 0),  # VL portion of the monetization
+                        mnt_sl_days=float(app.get("mnt_sl_days") or 0),  # SL portion of the monetization
+                        date_filed=str(app["date_filed"]),               # use date_filed as transaction date
+                        application_number=app.get("application_number"),
+                        new_status=new_status,                           # RETURNED or DISAPPROVED for remark label
+                    )
+                    if mnt_error:  # reversal failed
+                        return mnt_error  # return the error
+                else:  # standard leave types — use generic reversal
+                    reversal_error = LeaveApproval._post_reversal(  # restore the employee's balance
+                        employee_id=app["employee_id"],
+                        leave_type_id=app["leave_type_id"],
+                        leave_type_code=app["leave_type_code"],
+                        balance_type=app["balance_type"],
+                        total_days=total_days,
+                        application_id=app["id"],
+                        start_date=str(app["start_date"]),  # same date as the original DEBIT for correct ledger pairing
+                        application_number=app.get("application_number"),  # pass number for refund remark
+                        new_status=new_status,  # pass status to distinguish DISAPPROVED from RETURNED
+                    )
+                    if reversal_error:  # reversal posting failed
+                        return reversal_error  # return the error
 
             # reversed → reversed (e.g. RETURNED → DISAPPROVED) or active → active: no balance change
 

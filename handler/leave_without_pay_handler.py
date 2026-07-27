@@ -33,7 +33,8 @@ def get_teaching_leave_without_pay():
         page      = request.args.get("page",       default=1,            type=int)  # read page number
         limit     = request.args.get("limit",      default=10,           type=int)  # read page size
 
-        response = LeaveWithoutPay.get_paginated("TEACHING", date_from, date_to, page, limit)  # delegate to model
+        school_type = request.args.get("school_type", default=None, type=str)  # optional school type filter
+        response = LeaveWithoutPay.get_paginated("TEACHING", date_from, date_to, page, limit, school_type)  # delegate to model
         return jsonify(response), response["statusCode"]  # return result
 
     except Exception as e:  # catch unexpected errors
@@ -63,7 +64,8 @@ def get_non_teaching_leave_without_pay():
         page      = request.args.get("page",       default=1,            type=int)  # read page number
         limit     = request.args.get("limit",      default=10,           type=int)  # read page size
 
-        response = LeaveWithoutPay.get_paginated("NON_TEACHING", date_from, date_to, page, limit)  # delegate to model
+        school_type = request.args.get("school_type", default=None, type=str)  # optional school type filter
+        response = LeaveWithoutPay.get_paginated("NON_TEACHING", date_from, date_to, page, limit, school_type)  # delegate to model
         return jsonify(response), response["statusCode"]  # return result
 
     except Exception as e:  # catch unexpected errors

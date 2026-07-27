@@ -2476,6 +2476,201 @@
             "response": []
           }
         ]
+      },
+      {
+        "name": "Manual Balance Adjustments",
+        "item": [
+          {
+            "name": "Create Balance Adjustment",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n  \"employee_id\": 5,\n  \"leave_type_id\": 1,\n  \"transaction_type\": \"DEBIT\",\n  \"amount\": 2.5,\n  \"deduction_date\": \"2026-07-18\",\n  \"remarks\": \"Excess leave adjustment\"\n}",
+                "options": {
+                  "raw": {
+                    "language": "json"
+                  }
+                }
+              },
+              "url": {
+                "raw": "{{base_url}}/balance-deductions",
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "balance-deductions"
+                ]
+              },
+              "description": "Manually deducts or credits VL/SL days for a NON_TEACHING employee. transaction_type must be 'DEBIT' or 'CREDIT'. Only VL and SL leave types are allowed. Posts to the ledger and recalculates all balance snapshots immediately. ADMIN only."
+            },
+            "response": []
+          },
+          {
+            "name": "Get All Balance Adjustments",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/balance-deductions?page=1&limit=10",
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "balance-deductions"
+                ],
+                "query": [
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  },
+                  {
+                    "key": "employee_id",
+                    "value": "",
+                    "disabled": true
+                  }
+                ]
+              },
+              "description": "Paginated list of all manual balance adjustments (VL and SL only). Optional ?employee_id= filter. ADMIN only."
+            },
+            "response": []
+          },
+          {
+            "name": "Get Balance Adjustment History",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/balance-deductions/history?page=1&limit=10",
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "balance-deductions",
+                  "history"
+                ],
+                "query": [
+                  {
+                    "key": "page",
+                    "value": "1"
+                  },
+                  {
+                    "key": "limit",
+                    "value": "10"
+                  },
+                  {
+                    "key": "query",
+                    "value": "",
+                    "disabled": true,
+                    "description": "Search employee name, employee number, or deduction number"
+                  },
+                  {
+                    "key": "year",
+                    "value": "2026",
+                    "disabled": true
+                  },
+                  {
+                    "key": "date_from",
+                    "value": "",
+                    "disabled": true,
+                    "description": "YYYY-MM-DD. Overrides year filter."
+                  },
+                  {
+                    "key": "date_to",
+                    "value": "",
+                    "disabled": true,
+                    "description": "YYYY-MM-DD. Overrides year filter."
+                  },
+                  {
+                    "key": "employee_id",
+                    "value": "",
+                    "disabled": true
+                  },
+                  {
+                    "key": "leave_type_id",
+                    "value": "",
+                    "disabled": true,
+                    "description": "Still restricted to VL/SL internally"
+                  }
+                ]
+              },
+              "description": "Searchable, filterable history of manual balance adjustments. Always restricted to VL and SL. All params optional and combinable. year is ignored when date_from or date_to is provided. ADMIN only."
+            },
+            "response": []
+          },
+          {
+            "name": "Get Balance Adjustment By ID",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/balance-deductions/1",
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "balance-deductions",
+                  "1"
+                ]
+              },
+              "description": "Fetches a single manual balance adjustment by primary key. Returns 404 if not found or already soft-deleted. ADMIN only."
+            },
+            "response": []
+          },
+          {
+            "name": "Delete Balance Adjustment",
+            "request": {
+              "method": "DELETE",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/balance-deductions/1",
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "balance-deductions",
+                  "1"
+                ]
+              },
+              "description": "Soft-deletes the record, removes the MANUAL_DEDUCTION ledger entry, and recalculates all balance snapshots to restore the employee's balance. Returns 404 if not found, 409 if already deleted. ADMIN only."
+            },
+            "response": []
+          }
+        ]
       }
     ]
   }

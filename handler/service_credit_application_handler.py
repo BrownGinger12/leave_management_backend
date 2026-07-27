@@ -190,6 +190,28 @@ def search_service_credit_applications():
         return jsonify({"message": str(e)}), 500  # return 500 with error detail
 
 
+@require_role("ADMIN")
+def post_vsc_forwarded_balance():
+    """
+    Handles POST /service-credit-applications/forwarded-balance — posts a VSC forwarded
+    balance credit for a TEACHING employee into the OLD or NEW period table. ADMIN only.
+
+    Returns:
+        JSON response with the created balance data and HTTP 201, or an error response.
+    """
+    try:
+        data = request.get_json(silent=True)  # parse JSON body, return None if invalid
+
+        if not data:  # check if body is missing or not valid JSON
+            return jsonify({"message": "No data provided"}), 400  # return 400 if empty
+
+        response = ServiceCreditApplication.post_vsc_forwarded_balance(data)  # delegate to the model
+        return jsonify(response), response["statusCode"]  # return the model response
+
+    except Exception as e:  # catch unexpected errors
+        return jsonify({"message": str(e)}), 500  # return 500 with error detail
+
+
 @require_role("ADMIN", "DIVISION_PERSONNEL")
 def get_vsc_old_leave_summary_by_employee(employee_id: int):
     """

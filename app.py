@@ -22,6 +22,8 @@ from handler import undertime_tardiness_handler  # import undertime/tardiness de
 from handler import employee_type_conversion_handler  # import personnel type conversion handler functions
 from handler import dashboard_handler  # import dashboard and analytics handler functions
 from handler import leave_without_pay_handler  # import leave without pay handler functions
+from handler import annual_leave_credit_handler  # import annual leave credit handler functions
+from handler import balance_deduction_handler  # import manual balance deduction handler functions
 
 load_dotenv()  # load environment variables from .env file into os.environ
 
@@ -29,8 +31,10 @@ app = Flask(__name__)  # create the Flask application instance
 CORS(app)  # enable CORS for all routes
 
 from model.service_credit_application import ServiceCreditApplication  # import here to avoid circular imports at module level
+from model.annual_leave_credit import AnnualLeaveCredit  # import annual credit model for scheduler
 
 scheduler = BackgroundScheduler()  # create the background scheduler
+
 scheduler.add_job(  # register the daily CTO expiry check
     func=ServiceCreditApplication.expire_cto_credits,  # function to call
     trigger="cron",  # run on a schedule
@@ -39,6 +43,39 @@ scheduler.add_job(  # register the daily CTO expiry check
     id="cto_expiry_check",       # unique job ID for deduplication
     replace_existing=True,       # replace if already registered (safe on hot reload)
 )
+
+scheduler.add_job(  # register the Jan 1 annual leave credit job
+    func=AnnualLeaveCredit.post_annual_credits,  # function to call
+    trigger="cron",  # run on a fixed schedule
+    month=1,         # January
+    day=1,           # 1st
+    hour=0,          # at midnight
+    minute=1,        # one minute past midnight to avoid midnight race conditions
+    id="annual_leave_credit",  # unique job ID for deduplication
+    replace_existing=True,     # replace if already registered (safe on hot reload)
+)
+
+scheduler.add_job(  # register the 1st-of-month VL/SL credit job for NON_TEACHING employees
+    func=AnnualLeaveCredit.post_monthly_vl_sl_credits,  # function to call
+    trigger="cron",  # run on a fixed schedule
+    day=1,           # 1st of every month
+    hour=0,          # at midnight
+    minute=3,        # three minutes past midnight
+    id="monthly_vl_sl_credit",  # unique job ID for deduplication
+    replace_existing=True,      # replace if already registered (safe on hot reload)
+)
+
+scheduler.add_job(  # register the Jan 1 year-end balance reset job (WL→5, SPL→3, FL→5 with VL carryover)
+    func=AnnualLeaveCredit.reset_year_end_balances,  # function to call
+    trigger="cron",   # run on a fixed schedule
+    month=1,          # January
+    day=1,            # 1st
+    hour=0,           # at midnight
+    minute=2,         # two minutes past midnight — runs after annual_leave_credit
+    id="year_end_balance_reset",  # unique job ID for deduplication
+    replace_existing=True,        # replace if already registered (safe on hot reload)
+)
+
 scheduler.start()  # start the scheduler in the background
 ServiceCreditApplication.expire_cto_credits()  # run once immediately on startup to catch any expirations missed while the server was down
 
@@ -204,6 +241,7 @@ app.add_url_rule("/special-orders/<int:special_order_id>", view_func=special_ord
 
 app.add_url_rule("/service-credit-applications", view_func=service_credit_application_handler.submit_service_credit_application, methods=["POST"])  # submit CTO or VSC application; balance credited immediately
 app.add_url_rule("/service-credit-applications", view_func=service_credit_application_handler.get_all_service_credit_applications, methods=["GET"])  # list all applications (paginated)
+app.add_url_rule("/service-credit-applications/forwarded-balance", view_func=service_credit_application_handler.post_vsc_forwarded_balance, methods=["POST"])  # post VSC forwarded balance for OLD or NEW period (ADMIN only)
 app.add_url_rule("/service-credit-applications/search", view_func=service_credit_application_handler.search_service_credit_applications, methods=["GET"])  # search with optional filters: special_order_id, type, year, date_from, date_to
 app.add_url_rule("/service-credit-applications/number/<string:application_number>", view_func=service_credit_application_handler.get_service_credit_application_by_number, methods=["GET"])  # get by application number (no pagination)
 app.add_url_rule("/service-credit-applications/special-order/<int:special_order_id>", view_func=service_credit_application_handler.get_service_credit_applications_by_special_order, methods=["GET"])  # get all by Special Order (paginated)
@@ -232,8 +270,26 @@ app.add_url_rule("/dashboard/pending-applications", view_func=dashboard_handler.
 # Leave Without Pay routes (PAYROLL only)
 # --------------------------
 
-app.add_url_rule("/leave-without-pay/teaching", view_func=leave_without_pay_handler.get_teaching_leave_without_pay, methods=["GET"])  # paginated LWOP dates for TEACHING employees; supports ?date_from, ?date_to, ?page, ?limit
-app.add_url_rule("/leave-without-pay/non-teaching", view_func=leave_without_pay_handler.get_non_teaching_leave_without_pay, methods=["GET"])  # paginated LWOP dates for NON_TEACHING employees; supports ?date_from, ?date_to, ?page, ?limit
+app.add_url_rule("/leave-without-pay/teaching", view_func=leave_without_pay_handler.get_teaching_leave_without_pay, methods=["GET"])  # paginated LWOP dates for TEACHING employees; supports ?date_from, ?date_to, ?page, ?limit, ?school_type
+app.add_url_rule("/leave-without-pay/non-teaching", view_func=leave_without_pay_handler.get_non_teaching_leave_without_pay, methods=["GET"])  # paginated LWOP dates for NON_TEACHING employees; supports ?date_from, ?date_to, ?page, ?limit, ?school_type
+
+
+# --------------------------
+# Annual Leave Credit routes (ADMIN only)
+# --------------------------
+
+app.add_url_rule("/annual-leave-credits", view_func=annual_leave_credit_handler.post_annual_credits, methods=["POST"])  # manually trigger annual WL/SPL/FL credits; body: {year} optional; ADMIN only
+
+
+# --------------------------
+# Manual balance deduction routes
+# --------------------------
+
+app.add_url_rule("/balance-deductions", view_func=balance_deduction_handler.create_balance_deduction, methods=["POST"])  # manually deduct days from any leave balance (ADMIN only)
+app.add_url_rule("/balance-deductions", view_func=balance_deduction_handler.get_all_balance_deductions, methods=["GET"])  # list all deductions; optional ?employee_id=; ADMIN only
+app.add_url_rule("/balance-deductions/history", view_func=balance_deduction_handler.get_balance_deduction_history, methods=["GET"])  # searchable, filterable history; ?query, ?date_from, ?date_to, ?year, ?employee_id, ?leave_type_id (ADMIN only)
+app.add_url_rule("/balance-deductions/<int:deduction_id>", view_func=balance_deduction_handler.get_balance_deduction_by_id, methods=["GET"])  # get single deduction by ID (ADMIN only)
+app.add_url_rule("/balance-deductions/<int:deduction_id>", view_func=balance_deduction_handler.delete_balance_deduction, methods=["DELETE"])  # soft-delete and reverse the DEBIT (ADMIN only)
 
 
 if __name__ == "__main__":

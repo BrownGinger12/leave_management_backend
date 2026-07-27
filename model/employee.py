@@ -42,6 +42,7 @@ class Employee(BaseModel):
     first_name: str  # employee's first name
     last_name: str  # employee's last name
     middle_name: Optional[str] = None  # middle name, optional
+    sex: Optional[str] = None  # biological sex: MALE or FEMALE
     email: str  # employee's email address
     employee_type: str  # TEACHING or NON_TEACHING
     employment_status: str  # e.g. PERMANENT, TEMPORARY, CASUAL
@@ -53,6 +54,7 @@ class Employee(BaseModel):
     salary: Optional[float] = None  # monthly salary, optional
     contact_number: Optional[str] = None  # employee contact number, optional
     notes: Optional[str] = None  # free-text notes about the employee, optional
+    implementing_unit: Optional[str] = None  # Implementing Unit where the employee is deployed (optional)
     is_active: Optional[bool] = True  # True = active, False = soft-deleted
     photo: Optional[str] = None  # path/URL to the employee's photo, optional
 
@@ -129,32 +131,38 @@ class Employee(BaseModel):
 
             leave_card_number = data.get("leave_card_number") or Employee._generate_leave_card_number()  # use provided leave card number or auto-generate one
 
+            sex = data.get("sex", "").upper() if data.get("sex") else None  # normalise to uppercase
+            if sex and sex not in ("MALE", "FEMALE"):  # validate sex value if provided
+                return {"statusCode": 400, "message": "sex must be 'MALE' or 'FEMALE'"}
+
             result = query_insert(  # execute INSERT and return the new row ID
                 """INSERT INTO employees
                        (leave_card_number, employee_number, first_name, last_name,
-                        middle_name, email, employee_type, employment_status, school_id,
-                        division, original_appointment, latest_appointment,
+                        middle_name, sex, email, employee_type, employment_status, school_id,
+                        implementing_unit, division, original_appointment, latest_appointment,
                         position, salary, contact_number, notes, is_active, photo)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 [
-                    leave_card_number,                   # generated leave card number
-                    data["employee_number"],             # DepEd employee number
-                    data["first_name"],                  # first name
-                    data["last_name"],                   # last name
-                    data.get("middle_name"),             # middle name, may be None
-                    data["email"],                       # email address
-                    data["employee_type"],               # TEACHING or NON_TEACHING
-                    data["employment_status"],           # employment status
-                    data["school_id"],                   # school/office ID
-                    data.get("division"),                # division name, may be None
-                    data.get("original_appointment"),    # date of original appointment, may be None
-                    data.get("latest_appointment"),      # date of latest appointment, may be None
-                    data.get("position"),                # job position or title, may be None
-                    data.get("salary"),                  # monthly salary, may be None
-                    data.get("contact_number"),          # contact number, may be None
-                    data.get("notes"),                   # free-text notes, may be None
-                    data.get("is_active", True),         # active status, defaults to True
-                    data.get("photo"),                   # photo path/URL, may be None
+                    leave_card_number,                        # generated leave card number
+                    data["employee_number"],                  # DepEd employee number
+                    data["first_name"],                       # first name
+                    data["last_name"],                        # last name
+                    data.get("middle_name"),                  # middle name, may be None
+                    sex,                                      # MALE or FEMALE, may be None
+                    data["email"],                            # email address
+                    data["employee_type"],                    # TEACHING or NON_TEACHING
+                    data["employment_status"],                # employment status
+                    data["school_id"],                        # school/office ID
+                    data.get("implementing_unit"),            # IU name where deployed, may be None
+                    data.get("division"),                     # division name, may be None
+                    data.get("original_appointment"),         # date of original appointment, may be None
+                    data.get("latest_appointment"),           # date of latest appointment, may be None
+                    data.get("position"),                     # job position or title, may be None
+                    data.get("salary"),                       # monthly salary, may be None
+                    data.get("contact_number"),               # contact number, may be None
+                    data.get("notes"),                        # free-text notes, may be None
+                    data.get("is_active", True),              # active status, defaults to True
+                    data.get("photo"),                        # photo path/URL, may be None
                 ]
             )
 
@@ -179,15 +187,17 @@ class Employee(BaseModel):
     # --------------------------
 
     @staticmethod
-    def get_paginated(page: int = 1, limit: int = 10, school_id: int = None) -> dict:
+    def get_paginated(page: int = 1, limit: int = 10, school_id: int = None,
+                      division: str = None) -> dict:
         """
-        Retrieves a paginated list of employees ordered by ID.
-        When school_id is provided, filters to that school only and includes school info in the response.
+        Retrieves a paginated list of employees ordered by last name.
+        Supports optional filters: school_id and/or division (partial match).
 
         Parameters:
             page (int): The page number to retrieve (default 1).
             limit (int): The number of records per page (default 10).
-            school_id (int): Optional school filter; returns only employees from this school.
+            school_id (int): Optional — restrict to employees belonging to this school.
+            division (str): Optional — restrict to employees whose division contains this string (case-insensitive).
 
         Returns:
             dict: statusCode 200 with data list and pagination info, or 404 if no records found.
@@ -195,31 +205,37 @@ class Employee(BaseModel):
         try:
             offset = (page - 1) * limit  # calculate the row offset for the current page
 
+            conditions = []  # WHERE clause fragments built from provided filters
+            params = []  # bound parameter values
+
+            school = None  # school row for response context when filtering by school
+
             if school_id is not None:  # filter by school when school_id is provided
                 school = fetch_query(  # verify the school exists
                     "SELECT id, name FROM schools WHERE id = %s", [school_id]
                 )
                 if not school:  # school not found
                     return {"statusCode": 404, "message": f"School {school_id} not found"}  # return 404
+                conditions.append("school_id = %s")  # add school condition
+                params.append(school_id)  # bind school_id
 
-                total_row = fetch_query(  # count employees in this school
-                    "SELECT COUNT(*) AS total FROM employees WHERE school_id = %s", [school_id]
-                )
-                total = total_row[0]["total"] if total_row else 0  # extract total count
+            if division:  # filter by division substring when provided
+                conditions.append("division LIKE %s")  # partial match on division field
+                params.append(f"%{division.strip()}%")  # wrap in wildcards for LIKE
 
-                rows = fetch_query(  # fetch paginated employees for this school
-                    """SELECT * FROM employees
-                       WHERE school_id = %s
-                       ORDER BY last_name ASC, first_name ASC
-                       LIMIT %s OFFSET %s""",
-                    [school_id, limit, offset]
-                )
-            else:  # no school filter — return all employees
-                total = Employee.get_total()  # get global employee count for pagination metadata
-                rows = fetch_query(  # fetch employees for the requested page
-                    "SELECT * FROM employees ORDER BY id LIMIT %s OFFSET %s",
-                    [limit, offset]
-                )
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""  # assemble WHERE or empty
+
+            total_row = fetch_query(  # count matching employees for pagination metadata
+                f"SELECT COUNT(*) AS total FROM employees {where}", params
+            )
+            total = total_row[0]["total"] if total_row else 0  # extract total count
+
+            rows = fetch_query(  # fetch paginated employees matching the filters
+                f"""SELECT * FROM employees {where}
+                    ORDER BY last_name ASC, first_name ASC
+                    LIMIT %s OFFSET %s""",
+                params + [limit, offset]
+            )
 
             if not rows:  # check if any employees were returned
                 return {"statusCode": 404, "message": "No employees found"}  # return 404 if empty
@@ -227,13 +243,17 @@ class Employee(BaseModel):
             response = {  # build paginated response
                 "statusCode": 200,  # success code
                 "count": len(rows),  # number of records in this page
-                "total": total,  # total number of employees
+                "total": total,  # total matching employees
                 "page": page,  # current page number
                 "limit": limit,  # records per page
-                "data": [Employee._with_signed_photo(row) for row in rows],  # the employee records, with signed photo URLs
+                "filters": {  # echo back applied filters for the frontend
+                    "school_id": school_id,  # school filter value (or None)
+                    "division": division or None,  # division filter value (or None)
+                },
+                "data": [Employee._with_signed_photo(row) for row in rows],  # employee records with signed photo URLs
             }
 
-            if school_id is not None:  # include school context when filtering by school
+            if school is not None:  # include school context when filtering by school
                 response["school"] = school[0]  # embed school info in the response
 
             return response  # return the completed response
@@ -307,10 +327,15 @@ class Employee(BaseModel):
             dict: statusCode 200 with the updated employee data, or an error dict.
         """
         try:
+            if "sex" in data and data["sex"] is not None:  # validate sex before building field map
+                if str(data["sex"]).upper() not in ("MALE", "FEMALE"):  # only MALE and FEMALE are valid
+                    return {"statusCode": 400, "message": "sex must be 'MALE' or 'FEMALE'"}
+                data["sex"] = str(data["sex"]).upper()  # normalise to uppercase in-place
+
             allowed_fields = [  # fields that are permitted to be updated
-                "first_name", "last_name", "middle_name",
+                "first_name", "last_name", "middle_name", "sex",
                 "email", "employee_type", "employment_status", "school_id",
-                "division", "original_appointment", "latest_appointment",
+                "implementing_unit", "division", "original_appointment", "latest_appointment",
                 "position", "salary", "contact_number", "notes", "is_active", "photo"
             ]
 
@@ -391,17 +416,19 @@ class Employee(BaseModel):
     # --------------------------
 
     @staticmethod
-    def search(query_str: str, page: int = 1, limit: int = 10, school_id: int = None) -> dict:
+    def search(query_str: str, page: int = 1, limit: int = 10,
+               school_id: int = None, division: str = None) -> dict:
         """
         Searches employees by first name, last name, employee number, leave card number, or email.
-        When school_id is provided, restricts results to that school and includes school info and
-        pagination totals in the response.
+        Supports optional filters: school_id and/or division (partial match).
+        Filters are combined with the keyword search using AND.
 
         Parameters:
-            query_str (str): The search keyword to match against.
+            query_str (str): The search keyword to match against name/number/email fields.
             page (int): The page number to retrieve (default 1).
             limit (int): The number of results per page (default 10).
-            school_id (int): Optional school filter; restricts search to this school only.
+            school_id (int): Optional — restrict search to this school only.
+            division (str): Optional — restrict search to employees whose division contains this string.
 
         Returns:
             dict: statusCode 200 with matching employee records, or 404 if none found.
@@ -410,64 +437,70 @@ class Employee(BaseModel):
             offset = (page - 1) * limit  # calculate row offset for pagination
             like = f"%{query_str}%"  # wrap the search term with wildcards for LIKE matching
 
-            if school_id is not None:  # school-scoped search
+            keyword_clause = (  # the keyword LIKE check applied to searchable fields
+                "(first_name LIKE %s OR last_name LIKE %s "
+                "OR employee_number LIKE %s OR leave_card_number LIKE %s OR email LIKE %s)"
+            )
+            keyword_params = [like, like, like, like, like]  # one binding per LIKE in the clause
+
+            extra_conditions = []  # additional WHERE fragments from optional filters
+            extra_params = []  # params for the extra conditions
+
+            school = None  # school row for response context
+
+            if school_id is not None:  # restrict to a specific school when provided
                 school = fetch_query(  # verify the school exists
                     "SELECT id, name FROM schools WHERE id = %s", [school_id]
                 )
                 if not school:  # school not found
                     return {"statusCode": 404, "message": f"School {school_id} not found"}  # return 404
+                extra_conditions.append("school_id = %s")  # add school filter
+                extra_params.append(school_id)  # bind school_id
 
-                total_row = fetch_query(  # count matching employees in this school
-                    """SELECT COUNT(*) AS total FROM employees
-                       WHERE school_id = %s
-                         AND (first_name LIKE %s OR last_name LIKE %s
-                              OR employee_number LIKE %s OR leave_card_number LIKE %s
-                              OR email LIKE %s)""",
-                    [school_id, like, like, like, like, like]
-                )
-                total = total_row[0]["total"] if total_row else 0  # extract total count
+            if division:  # restrict to a specific division when provided
+                extra_conditions.append("division LIKE %s")  # partial match on division field
+                extra_params.append(f"%{division.strip()}%")  # wrap in wildcards
 
-                rows = fetch_query(  # fetch matching employees for this school
-                    """SELECT * FROM employees
-                       WHERE school_id = %s
-                         AND (first_name LIKE %s OR last_name LIKE %s
-                              OR employee_number LIKE %s OR leave_card_number LIKE %s
-                              OR email LIKE %s)
-                       ORDER BY last_name ASC, first_name ASC
-                       LIMIT %s OFFSET %s""",
-                    [school_id, like, like, like, like, like, limit, offset]
-                )
+            # Build the full WHERE clause combining keyword search and optional filters
+            if extra_conditions:  # filters present — combine with AND
+                where = f"WHERE {keyword_clause} AND {' AND '.join(extra_conditions)}"
+                base_params = keyword_params + extra_params  # keyword bindings then filter bindings
+            else:  # no extra filters — keyword search only
+                where = f"WHERE {keyword_clause}"
+                base_params = keyword_params
 
-                if not rows:  # no matches
-                    return {"statusCode": 404, "school": school[0], "message": "No employees found matching the query"}
+            total_row = fetch_query(  # count total matching employees for pagination metadata
+                f"SELECT COUNT(*) AS total FROM employees {where}", base_params
+            )
+            total = total_row[0]["total"] if total_row else 0  # extract total count
 
-                return {  # return school-scoped results with pagination metadata
-                    "statusCode": 200,  # success code
-                    "school": school[0],  # school info for context
-                    "count": len(rows),  # number of records in this page
-                    "total": total,  # total matching employees in this school
-                    "page": page,  # current page number
-                    "limit": limit,  # records per page
-                    "data": [Employee._with_signed_photo(row) for row in rows],  # employees with signed photo URLs
-                }
-
-            rows = fetch_query(  # global search across all employees
-                """SELECT * FROM employees
-                   WHERE first_name LIKE %s OR last_name LIKE %s
-                      OR employee_number LIKE %s OR leave_card_number LIKE %s
-                      OR email LIKE %s
-                   ORDER BY id LIMIT %s OFFSET %s""",
-                [like, like, like, like, like, limit, offset]
+            rows = fetch_query(  # fetch paginated matching employees
+                f"""SELECT * FROM employees {where}
+                    ORDER BY last_name ASC, first_name ASC
+                    LIMIT %s OFFSET %s""",
+                base_params + [limit, offset]
             )
 
-            return {  # return matching results
+            if not rows:  # no matches found
+                return {"statusCode": 404, "message": "No employees found matching the query"}  # return 404
+
+            response = {  # build the result response
                 "statusCode": 200,  # success code
-                "count": len(rows),  # number of results returned
-                "data": [Employee._with_signed_photo(row) for row in rows],  # the matching employee records, with signed photo URLs
-            } if rows else {  # return 404 if no matches
-                "statusCode": 404,
-                "message": "No employees found matching the query",
+                "count": len(rows),  # number of records in this page
+                "total": total,  # total matching employees across all pages
+                "page": page,  # current page number
+                "limit": limit,  # records per page
+                "filters": {  # echo back applied filters for the frontend
+                    "school_id": school_id,  # school filter (or None)
+                    "division": division or None,  # division filter (or None)
+                },
+                "data": [Employee._with_signed_photo(row) for row in rows],  # employees with signed photo URLs
             }
+
+            if school is not None:  # include school context when filtering by school
+                response["school"] = school[0]  # embed school info
+
+            return response  # return the completed response
 
         except Exception as e:  # catch unexpected errors
             return {"statusCode": 500, "message": str(e)}  # return 500 with error detail

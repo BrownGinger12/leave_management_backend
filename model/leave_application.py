@@ -1,8 +1,9 @@
 from pydantic import BaseModel  # import BaseModel as the base for all models
 from typing import Optional  # import Optional for nullable fields
-from gateway.mysql_gateway import fetch_query, query, query_insert, recalculate_ledger_snapshots  # import gateway functions
+from gateway.mysql_gateway import fetch_query, query, query_insert, recalculate_ledger_snapshots, get_next_sequence  # import gateway functions
 from flask import g  # import g to read the authenticated user set by the auth decorator
-import uuid  # import uuid to generate unique application numbers
+from datetime import date as _today_date  # import date for application number year computation
+import uuid  # import uuid to generate unique transaction numbers
 
 
 class LeaveApplication(BaseModel):
@@ -32,13 +33,17 @@ class LeaveApplication(BaseModel):
     @staticmethod
     def _generate_application_number() -> str:
         """
-        Generates a unique leave application number using a UUID-based suffix.
+        Generates a sequential leave application number in the format YY-NNNNNN.
+        The counter resets to 000001 on January 1 of each new year.
+        Uses an atomic DB sequence to prevent duplicate numbers under concurrent requests.
 
         Returns:
-            str: An application number in the format 'LA-XXXXXXXX'.
+            str: Application number, e.g. '26-000001'.
         """
-        suffix = uuid.uuid4().hex[:8].upper()  # take first 8 chars of a UUID hex string
-        return f"LA-{suffix}"  # format as LA-XXXXXXXX
+        year = _today_date.today().year  # current calendar year
+        yy = str(year)[-2:]  # 2-digit year suffix (e.g. '26' for 2026)
+        seq = get_next_sequence(year, "LEAVE")  # atomically fetch the next sequence number
+        return f"{yy}-{seq:06d}"  # format as YY-NNNNNN (e.g. '26-000001')
 
     # --------------------------
     # Generate transaction number
@@ -1087,8 +1092,8 @@ class LeaveApplication(BaseModel):
             result = query_insert(  # insert the leave application
                 """INSERT INTO leave_applications
                        (application_number, employee_id, leave_type_id, date_filed,
-                        reason, other_leave_description, status)
-                   VALUES (%s, %s, %s, %s, %s, %s, 'FOR HRMO ACTION')""",
+                        reason, other_leave_description, status, submitted_by)
+                   VALUES (%s, %s, %s, %s, %s, %s, 'FOR HRMO ACTION', %s)""",
                 [
                     application_number,                   # generated application number
                     data["employee_id"],                  # employee submitting the application
@@ -1096,6 +1101,7 @@ class LeaveApplication(BaseModel):
                     data["date_filed"],                   # date filed
                     data["reason"],                       # reason for leave
                     data.get("other_leave_description"),  # extra description for Others type
+                    data.get("submitted_by"),             # FK to users.id — user who filed this application
                 ]
             )
             if result["statusCode"] != 200:  # insert failed
@@ -1136,10 +1142,16 @@ class LeaveApplication(BaseModel):
             # --- Step 11: fetch and return the created application ---
             application = fetch_query(  # fetch the full created application record
                 """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
-                          e.first_name, e.last_name, e.employee_number
+                          e.first_name, e.last_name, e.employee_number,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
                    JOIN employees e ON e.id = la.employee_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE la.id = %s""",
                 [application_id]
             )
@@ -1178,10 +1190,16 @@ class LeaveApplication(BaseModel):
         try:
             rows = fetch_query(  # fetch the application with joined details
                 """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
-                          e.first_name, e.last_name, e.employee_number
+                          e.first_name, e.last_name, e.employee_number,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
                    JOIN employees e ON e.id = la.employee_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE la.id = %s AND la.is_deleted = 0""",
                 [application_id]
             )
@@ -1219,9 +1237,15 @@ class LeaveApplication(BaseModel):
                 return {"statusCode": 404, "message": "Employee not found"}
 
             rows = fetch_query(  # fetch all non-CTO/VSC applications for the employee
-                """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name
+                """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE la.employee_id = %s
                      AND lt.code NOT IN ('CTO', 'VSC')
                      AND la.is_deleted = 0
@@ -1273,9 +1297,15 @@ class LeaveApplication(BaseModel):
 
             # --- Leave applications for this year (non-CTO/VSC) sorted by date filed ---
             rows = fetch_query(
-                """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name, lt.balance_type
+                """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name, lt.balance_type,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE la.employee_id = %s
                      AND YEAR(la.date_filed) = %s
                      AND lt.code NOT IN ('CTO', 'VSC')
@@ -1379,8 +1409,9 @@ class LeaveApplication(BaseModel):
                 """
                 running = opening  # start from the opening balance for this year
                 snap_list = []  # (tx_date_str, lid, balance_after) for all transactions
-                app_debit_map = {}  # app_id -> (lid, balance_after, tx_date) from LEAVE_APPLICATION DEBITs
-                ut_debit_map = {}   # ut_id  -> balance_after from UNDERTIME_TARDINESS DEBITs
+                app_debit_map = {}   # app_id -> (lid, balance_after, tx_date) from LEAVE_APPLICATION DEBITs
+                ut_debit_map = {}    # ut_id  -> balance_after from UNDERTIME_TARDINESS DEBITs
+                manual_adj_map = {}  # deduction_id -> balance_after from MANUAL_DEDUCTION entries
                 for row in ledger:  # iterate in (transaction_date ASC, id ASC) order
                     amt = float(row["amount"])  # transaction amount
                     if row["transaction_type"] == "CREDIT":  # credit increases balance
@@ -1390,15 +1421,16 @@ class LeaveApplication(BaseModel):
                     tx_date = str(row["transaction_date"])  # string representation for comparison
                     lid = row["id"]  # ledger row id
                     snap_list.append((tx_date, lid, running))  # record snapshot at this point
-                    if row["transaction_type"] == "DEBIT":  # build debit lookup maps
-                        if row["source_type"] == "LEAVE_APPLICATION":  # leave app debit
-                            app_debit_map[row["source_id"]] = (lid, running, tx_date)
-                        elif row["source_type"] == "UNDERTIME_TARDINESS":  # UT deduction debit
-                            ut_debit_map[row["source_id"]] = running
-                return snap_list, app_debit_map, ut_debit_map
+                    if row["source_type"] == "LEAVE_APPLICATION" and row["transaction_type"] == "DEBIT":  # leave app debit
+                        app_debit_map[row["source_id"]] = (lid, running, tx_date)
+                    elif row["source_type"] == "UNDERTIME_TARDINESS" and row["transaction_type"] == "DEBIT":  # UT deduction debit
+                        ut_debit_map[row["source_id"]] = running
+                    elif row["source_type"] == "MANUAL_DEDUCTION":  # manual balance adjustment (DEBIT or CREDIT)
+                        manual_adj_map[row["source_id"]] = running  # keyed by manual_balance_deductions.id
+                return snap_list, app_debit_map, ut_debit_map, manual_adj_map
 
-            vl_snaps, vl_app_debit, vl_ut_debit = compute_snaps(vl_ledger, vl_opening)  # VL computed snapshots and debit maps
-            sl_snaps, sl_app_debit, _            = compute_snaps(sl_ledger, sl_opening)  # SL computed snapshots and debit map
+            vl_snaps, vl_app_debit, vl_ut_debit, vl_manual_adj = compute_snaps(vl_ledger, vl_opening)  # VL computed snapshots and debit maps
+            sl_snaps, sl_app_debit, _,            sl_manual_adj = compute_snaps(sl_ledger, sl_opening)  # SL computed snapshots and debit map
 
             # --- Helper: balance at or before a given date string ---
             def bal_at_date(snaps, date_str, opening):
@@ -1501,6 +1533,48 @@ class LeaveApplication(BaseModel):
                 for ut in ut_rows
             ]
 
+            # --- Manual balance adjustments (DEBIT/CREDIT) for this year ---
+            manual_adj_rows = fetch_query(  # fetch all non-deleted manual adjustments for this employee and year
+                """SELECT id, deduction_number, leave_type_id, transaction_type,
+                          amount, deduction_date, remarks
+                   FROM manual_balance_deductions
+                   WHERE employee_id = %s AND YEAR(deduction_date) = %s AND is_deleted = 0
+                   ORDER BY deduction_date ASC, id ASC""",
+                [employee_id, year]
+            ) or []
+
+            manual_adjustments = []  # output list — one entry per manual adjustment record
+            for adj in manual_adj_rows:  # iterate over each manual adjustment
+                adj_id = adj["id"]  # primary key — used to look up computed balance
+                lt_id  = adj["leave_type_id"]  # which leave type was adjusted
+                t_type = adj["transaction_type"]  # DEBIT or CREDIT
+
+                if lt_id == vl_leave_type_id:  # VL adjustment
+                    balance_after = vl_manual_adj.get(adj_id)  # computed VL balance after this entry
+                    vl_bal = balance_after  # VL balance after this adjustment
+                    sl_bal = bal_at_date(sl_snaps, str(adj["deduction_date"]), sl_opening)  # SL at same point
+                elif lt_id == sl_leave_type_id:  # SL adjustment
+                    balance_after = sl_manual_adj.get(adj_id)  # computed SL balance after this entry
+                    vl_bal = bal_at_date(vl_snaps, str(adj["deduction_date"]), vl_opening)  # VL at same point
+                    sl_bal = balance_after  # SL balance after this adjustment
+                else:  # unknown leave type — include without balance context
+                    balance_after = None
+                    vl_bal = None
+                    sl_bal = None
+
+                manual_adjustments.append({  # build the output entry for this adjustment
+                    "id":                adj_id,  # primary key
+                    "deduction_number":  adj["deduction_number"],  # YY-NNNNNN reference number
+                    "leave_type_id":     lt_id,  # leave type adjusted
+                    "transaction_type":  t_type,  # DEBIT or CREDIT
+                    "amount":            float(adj["amount"]),  # days adjusted
+                    "deduction_date":    str(adj["deduction_date"]),  # effective date
+                    "remarks":           adj.get("remarks"),  # optional notes
+                    "balance_after":     balance_after,  # computed balance of the adjusted leave type after this entry
+                    "vl_balance_after":  vl_bal,  # computed VL balance at this point in time
+                    "sl_balance_after":  sl_bal,  # computed SL balance at this point in time
+                })
+
             # --- Forwarded balances for this year ---
             forwarded_rows = fetch_query(
                 """SELECT lct.id, lct.transaction_number, lct.leave_type_id,
@@ -1526,6 +1600,7 @@ class LeaveApplication(BaseModel):
                 "count": len(enriched),                               # total leave applications returned
                 "forwarded_balances": forwarded_balances,             # FORWARDED_BALANCE credits this year
                 "undertime_tardiness_deductions": ut_deductions,      # VL deductions for UT/tardiness this year
+                "manual_adjustments": manual_adjustments,             # manual DEBIT/CREDIT adjustments to VL/SL this year
                 "data": enriched,                                     # applications in date_filed ASC order
             }
 
@@ -1550,10 +1625,16 @@ class LeaveApplication(BaseModel):
         try:
             rows = fetch_query(  # fetch the application matching the application number
                 """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
-                          e.first_name, e.last_name, e.employee_number
+                          e.first_name, e.last_name, e.employee_number,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
                    JOIN employees e ON e.id = la.employee_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE la.application_number = %s AND la.is_deleted = 0""",
                 [application_number]
             )
@@ -1638,10 +1719,16 @@ class LeaveApplication(BaseModel):
 
             rows = fetch_query(  # fetch the paginated matching applications
                 f"""SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
-                           e.first_name, e.last_name, e.employee_number
+                           e.first_name, e.last_name, e.employee_number,
+                           sub_u.username AS submitted_by_username,
+                           CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                           CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                     FROM leave_applications la
                     JOIN leave_types lt ON lt.id = la.leave_type_id
                     JOIN employees e ON e.id = la.employee_id
+                    LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                    LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                    LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                     {where_clause}
                     ORDER BY la.date_filed DESC, la.id DESC
                     LIMIT %s OFFSET %s""",
@@ -1691,10 +1778,16 @@ class LeaveApplication(BaseModel):
 
             rows = fetch_query(  # fetch paginated applications including CTO and VSC
                 """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
-                          e.first_name, e.last_name, e.employee_number
+                          e.first_name, e.last_name, e.employee_number,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
                    JOIN employees e ON e.id = la.employee_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE la.is_deleted = 0
                    ORDER BY la.date_filed DESC, la.id DESC
                    LIMIT %s OFFSET %s""",
@@ -1746,10 +1839,16 @@ class LeaveApplication(BaseModel):
 
             rows = fetch_query(  # fetch paginated CTO/VSC applications
                 """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
-                          e.first_name, e.last_name, e.employee_number
+                          e.first_name, e.last_name, e.employee_number,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
                    JOIN employees e ON e.id = la.employee_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE lt.code IN ('CTO', 'VSC') AND la.is_deleted = 0
                    ORDER BY la.date_filed DESC, la.id DESC
                    LIMIT %s OFFSET %s""",
@@ -1794,9 +1893,15 @@ class LeaveApplication(BaseModel):
                 return {"statusCode": 404, "message": "Employee not found"}
 
             rows = fetch_query(  # fetch all CTO/VSC applications for the employee
-                """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name
+                """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE la.employee_id = %s
                      AND lt.code IN ('CTO', 'VSC')
                      AND la.is_deleted = 0
@@ -2051,10 +2156,16 @@ class LeaveApplication(BaseModel):
             # --- Step 11: fetch and return enriched updated application ---
             updated = fetch_query(  # re-fetch the application with all joins
                 """SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
-                          e.first_name, e.last_name, e.employee_number
+                          e.first_name, e.last_name, e.employee_number,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
                    JOIN employees e ON e.id = la.employee_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE la.id = %s""",
                 [application_id]
             )
@@ -2186,10 +2297,16 @@ class LeaveApplication(BaseModel):
 
             rows = fetch_query(  # fetch paginated applications (optionally filtered by school)
                 f"""SELECT la.*, lt.code AS leave_type_code, lt.name AS leave_type_name,
-                          e.first_name, e.last_name, e.employee_number
+                          e.first_name, e.last_name, e.employee_number,
+                          sub_u.username AS submitted_by_username,
+                          CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                          CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name
                    FROM leave_applications la
                    JOIN leave_types lt ON lt.id = la.leave_type_id
                    JOIN employees e ON e.id = la.employee_id
+                   LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                   LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                   LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
                    WHERE lt.code NOT IN ('CTO', 'VSC') AND la.is_deleted = 0 {school_filter}
                    ORDER BY la.date_filed DESC, la.id DESC
                    LIMIT %s OFFSET %s""",

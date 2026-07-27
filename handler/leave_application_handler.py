@@ -26,6 +26,7 @@ def submit_leave_application():
             if denied:  # None means allowed; tuple means forbidden
                 return denied  # return 403
 
+        data["submitted_by"] = g.current_user.get("user_id")  # attach the logged-in user's ID for audit trail
         response = LeaveApplication.submit(data)  # delegate submission logic to the model
         return jsonify(response), response["statusCode"]  # return the model response
 

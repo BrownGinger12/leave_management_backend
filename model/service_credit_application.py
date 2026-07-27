@@ -1,8 +1,8 @@
 from pydantic import BaseModel  # import BaseModel as the base for all models
 from typing import Optional, List  # import Optional and List for type hints
-from gateway.mysql_gateway import fetch_query, query, query_insert, recalculate_ledger_snapshots  # import gateway functions
+from gateway.mysql_gateway import fetch_query, query, query_insert, recalculate_ledger_snapshots, get_next_sequence  # import gateway functions
 from datetime import date  # import date for date parsing, comparison, and expiry computation
-import uuid  # import uuid to generate unique application and transaction numbers
+import uuid  # import uuid to generate unique transaction numbers
 
 
 class ServiceCreditApplication(BaseModel):
@@ -13,7 +13,7 @@ class ServiceCreditApplication(BaseModel):
         employee_id: FK to the employee submitting the application.
         special_order_id: FK to special_orders.id — the Special Order authorizing this credit.
         type: Credit type — CTO (Compensatory Time Off) or VSC (Vacation Service Credits).
-        hours_rendered: Total hours the employee rendered during the activity.
+        days_rendered: Total days the employee rendered during the activity.
         participation_dates: List of individual dates the employee participated.
         date_filed: Date the application was submitted (YYYY-MM-DD).
         date_of_upload: Date the supporting document was uploaded (YYYY-MM-DD).
@@ -21,7 +21,7 @@ class ServiceCreditApplication(BaseModel):
     """
     employee_id: int  # FK to employees table
     special_order_id: int  # FK to special_orders.id; the SO authorizing this credit
-    hours_rendered: float  # hours the employee rendered during the activity
+    days_rendered: float  # days the employee rendered during the activity
     participation_dates: List[str]  # individual participation dates as YYYY-MM-DD strings
     date_filed: str  # date the application was submitted
     date_of_upload: Optional[str] = None  # date the supporting document was uploaded
@@ -34,13 +34,17 @@ class ServiceCreditApplication(BaseModel):
     @staticmethod
     def _generate_application_number() -> str:
         """
-        Generates a unique service credit application number using a UUID-based suffix.
+        Generates a sequential CTO/VSC application number in the format YY-NNNNNN.
+        The counter resets to 000001 on January 1 of each new year.
+        Uses an atomic DB sequence to prevent duplicate numbers under concurrent requests.
 
         Returns:
-            str: An application number in the format 'SC-XXXXXXXX'.
+            str: Application number, e.g. '26-000001'.
         """
-        suffix = uuid.uuid4().hex[:8].upper()  # take first 8 chars of a UUID hex string
-        return f"SC-{suffix}"  # format as SC-XXXXXXXX
+        year = date.today().year  # current calendar year
+        yy = str(year)[-2:]  # 2-digit year suffix (e.g. '26' for 2026)
+        seq = get_next_sequence(year, "CTO")  # atomically fetch the next sequence number for CTO/VSC apps
+        return f"{yy}-{seq:06d}"  # format as YY-NNNNNN (e.g. '26-000001')
 
     # --------------------------
     # Generate transaction number
@@ -151,13 +155,13 @@ class ServiceCreditApplication(BaseModel):
         Submits a new CTO or VSC service credit application.
         The credit type (CTO or VSC) is determined automatically from the employee's type:
         TEACHING employees receive VSC; NON_TEACHING employees receive CTO.
-        Computes balance_earned from hours_rendered (every 8 hours = 1.5 days).
+        Computes balance_earned from days_rendered (1 day rendered = 1 day credit).
         valid_until is auto-computed as 1 year from the latest participation date (CTO only).
         Credit is posted to the ledger immediately on submission — no approval step.
 
         Parameters:
             data (dict): Application fields — employee_id, special_order_id,
-                         hours_rendered, participation_dates (list of YYYY-MM-DD strings),
+                         days_rendered, participation_dates (list of YYYY-MM-DD strings),
                          date_filed.
 
         Returns:
@@ -165,7 +169,7 @@ class ServiceCreditApplication(BaseModel):
         """
         try:
             required_fields = [  # fields that must be present in the request
-                "employee_id", "special_order_id", "hours_rendered",
+                "employee_id", "special_order_id", "days_rendered",
                 "participation_dates", "date_filed"
             ]
 
@@ -178,10 +182,10 @@ class ServiceCreditApplication(BaseModel):
             if not isinstance(participation_dates, list) or len(participation_dates) == 0:  # validate the dates list
                 return {"statusCode": 400, "message": "participation_dates must be a non-empty list of date strings"}  # return 400
 
-            hours = float(data["hours_rendered"])  # cast to float for arithmetic
+            days = float(data["days_rendered"])  # cast to float for arithmetic
 
-            if hours <= 0:  # validate hours rendered is a positive number
-                return {"statusCode": 400, "message": "hours_rendered must be greater than 0"}  # return 400 if invalid
+            if days <= 0:  # validate days rendered is a positive number
+                return {"statusCode": 400, "message": "days_rendered must be greater than 0"}  # return 400 if invalid
 
             parsed_dates = []  # list to hold validated date objects
             for d in participation_dates:  # loop through each provided date string
@@ -190,7 +194,7 @@ class ServiceCreditApplication(BaseModel):
                 except ValueError:  # catch invalid date format
                     return {"statusCode": 400, "message": f"Invalid date format: {d}. Expected YYYY-MM-DD"}  # return 400
 
-            balance_earned = round(hours / 8 * 1.5, 2)  # compute credit: every 8 hours = 1.5 days
+            balance_earned = round(days, 2)  # compute credit: 1 day rendered = 1 day credit
 
             latest_date = max(parsed_dates)  # find the latest participation date for auto expiry
 
@@ -211,12 +215,11 @@ class ServiceCreditApplication(BaseModel):
             else:  # unrecognised employee type
                 return {"statusCode": 400, "message": f"Unrecognised employee_type '{employee_type}'"}  # return 400
 
-            valid_until = None  # VSC has no expiry; CTO expiry is always auto-computed below
-            if credit_type == "CTO":  # CTO credits expire 1 year from the latest participation date
-                try:
-                    valid_until = latest_date.replace(year=latest_date.year + 1).isoformat()  # 1 year from latest date, same month/day
-                except ValueError:  # handles Feb 29 edge case when next year is not a leap year
-                    valid_until = latest_date.replace(year=latest_date.year + 1, day=28).isoformat()  # fall back to Feb 28
+            # CTO expires Dec 31 of the year AFTER the activity year; VSC expires Dec 31 of the activity year itself
+            if credit_type == "CTO":  # CTO: expires end of next calendar year
+                valid_until = date(latest_date.year + 1, 12, 31).isoformat()  # Dec 31 of next calendar year
+            else:  # VSC: expires end of the same calendar year the activity occurred
+                valid_until = date(latest_date.year, 12, 31).isoformat()  # Dec 31 of activity year
 
             special_order = fetch_query(  # verify the Special Order exists and get date_of_activity for VSC routing
                 "SELECT id, date_of_activity FROM special_orders WHERE id = %s", [data["special_order_id"]]
@@ -237,7 +240,7 @@ class ServiceCreditApplication(BaseModel):
             result = query_insert(  # insert the service credit application
                 """INSERT INTO service_credit_applications
                        (application_number, employee_id, special_order_id, type,
-                        hours_rendered, balance_earned, valid_until,
+                        days_rendered, balance_earned, valid_until,
                         date_filed, date_of_upload, uploaded_by)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 [
@@ -245,8 +248,8 @@ class ServiceCreditApplication(BaseModel):
                     data["employee_id"],             # employee submitting the application
                     data["special_order_id"],        # FK to special_orders.id; the SO authorizing this credit
                     credit_type,                     # CTO (NON_TEACHING) or VSC (TEACHING) — auto-derived
-                    hours,                           # hours rendered
-                    balance_earned,                  # computed balance: hours / 8 * 1.5
+                    days,                            # days rendered
+                    balance_earned,                  # computed balance: equals days_rendered (1:1)
                     valid_until,                     # 1 year from latest participation date (CTO only); NULL for VSC
                     data["date_filed"],              # date the application was filed
                     data.get("date_of_upload"),      # date the supporting document was uploaded
@@ -727,7 +730,7 @@ class ServiceCreditApplication(BaseModel):
                           ccb.created_at AS credit_created_at,
                           sca.id AS service_credit_application_id,
                           sca.application_number AS credit_application_number,
-                          sca.hours_rendered,
+                          sca.days_rendered,
                           sca.balance_earned,
                           sca.date_filed,
                           sca.date_of_upload,
@@ -1004,7 +1007,7 @@ class ServiceCreditApplication(BaseModel):
                        vb.remarks AS balance_remarks,
                        sca.id AS service_credit_application_id,
                        sca.application_number AS credit_application_number,
-                       sca.hours_rendered,
+                       sca.days_rendered,
                        sca.balance_earned,
                        sca.date_filed,
                        sca.date_of_upload,
@@ -1099,6 +1102,35 @@ class ServiceCreditApplication(BaseModel):
             for row in (rows or []):  # index by application ID for O(1) lookup
                 app_details[row["id"]] = dict(row)
 
+        # Fetch individual leave dates (with/without pay) for each application
+        leave_date_details = {}  # app_id -> {with_pay, without_pay, all, days_with_pay, days_without_pay}
+        if log_app_ids:  # only query if there are applications
+            date_ph = ", ".join(["%s"] * len(log_app_ids))  # build IN clause
+            ld_rows = fetch_query(  # fetch all leave dates for these apps with pay status
+                f"""SELECT leave_application_id, DATE_FORMAT(leave_date, '%%Y-%%m-%%d') AS leave_date,
+                           duration_type, is_paid
+                    FROM leave_application_dates
+                    WHERE leave_application_id IN ({date_ph})
+                    ORDER BY leave_date ASC""",
+                log_app_ids
+            )
+            for dr in (ld_rows or []):  # group dates under their parent application
+                a_id = dr["leave_application_id"]  # application primary key
+                if a_id not in leave_date_details:  # init bucket for this app
+                    leave_date_details[a_id] = {
+                        "with_pay": [], "without_pay": [], "all": [],
+                        "days_with_pay": 0.0, "days_without_pay": 0.0,
+                    }
+                ldate = str(dr["leave_date"])  # the leave date string
+                day_val = 1.0 if dr["duration_type"] == "FULL_DAY" else 0.5  # full = 1.0, half = 0.5
+                leave_date_details[a_id]["all"].append(ldate)  # add to combined list
+                if int(dr["is_paid"]) == 1:  # paid date
+                    leave_date_details[a_id]["with_pay"].append(ldate)  # add to paid list
+                    leave_date_details[a_id]["days_with_pay"] += day_val  # accumulate paid days
+                else:  # unpaid (LWOP) date
+                    leave_date_details[a_id]["without_pay"].append(ldate)  # add to unpaid list
+                    leave_date_details[a_id]["days_without_pay"] += day_val  # accumulate unpaid days
+
         # Group deduction log entries by credit_balance_id
         deduction_by_credit = {}  # credit_balance_id -> list of {leave_application_id, amount_deducted}
         for log_row in deduction_logs:  # iterate log entries
@@ -1125,6 +1157,14 @@ class ServiceCreditApplication(BaseModel):
             running_balance = float(credit["original_balance"])  # running balance starts at original
             leave_applications = []  # enriched leave application rows for this credit
 
+            if credit["service_credit_application_id"] is None:  # forwarded balance — no linked SCA
+                leave_applications.append({  # add a synthetic credit line item as the opening entry
+                    "entry_type":          "FORWARDED_BALANCE",  # marks this as a forwarded balance, not a leave app
+                    "amount_from_credit":  float(credit["original_balance"]),  # days credited (positive)
+                    "balance_after":       round(running_balance, 3),  # running balance after this credit
+                    "remarks":             credit.get("balance_remarks"),  # remarks from the balance table
+                })
+
             for entry in log_entries:  # iterate deductions in insertion order (chronological)
                 app = app_details.get(entry["leave_application_id"])  # fetch application details
                 if not app:  # application no longer accessible (deleted etc.)
@@ -1134,10 +1174,18 @@ class ServiceCreditApplication(BaseModel):
                 amount_from_credit = entry["amount_deducted"] if is_active else 0.0  # reversed apps contribute 0
                 running_balance -= amount_from_credit  # apply deduction to running balance
 
+                date_info = leave_date_details.get(entry["leave_application_id"], {})  # per-date pay info
+
                 leave_applications.append({  # build enriched row for this application
+                    "entry_type":              "LEAVE_APPLICATION",  # marks this as a regular leave application
                     **app,  # all leave application fields
-                    "amount_from_credit": amount_from_credit,  # days charged to this specific credit
-                    "balance_after": round(running_balance, 3),  # running balance after this deduction
+                    "amount_from_credit":      amount_from_credit,  # days charged to this specific credit
+                    "balance_after":           round(running_balance, 3),  # running balance after this deduction
+                    "leave_dates_with_pay":    date_info.get("with_pay", []),  # list of paid leave dates
+                    "leave_dates_without_pay": date_info.get("without_pay", []),  # list of LWOP leave dates
+                    "total_dates_incurred":    date_info.get("all", []),  # all leave dates combined
+                    "days_with_pay":           round(date_info.get("days_with_pay", 0.0), 2),  # total paid days
+                    "days_without_pay":        round(date_info.get("days_without_pay", 0.0), 2),  # total LWOP days
                 })
 
             credit_row["leave_applications"] = leave_applications  # attach enriched leave apps
@@ -1238,6 +1286,137 @@ class ServiceCreditApplication(BaseModel):
                 "page": page,  # current page number
                 "limit": limit,  # records per page
                 "data": [ServiceCreditApplication._with_dates(row) for row in rows] if rows else [],  # attach dates to each row
+            }
+
+        except Exception as e:  # catch unexpected errors
+            return {"statusCode": 500, "message": str(e)}  # return 500 with error detail
+
+    # --------------------------
+    # Post VSC forwarded balance (OLD or NEW period)
+    # --------------------------
+
+    @staticmethod
+    def post_vsc_forwarded_balance(data: dict) -> dict:
+        """
+        Posts a VSC forwarded balance credit for a TEACHING employee.
+        Inserts a row into vsc_old_credit_balances or vsc_new_credit_balances
+        (service_credit_application_id = NULL) and posts a FORWARDED_BALANCE
+        CREDIT to leave_credit_transactions with transaction_date = Jan 1 of the year.
+        Idempotent: rejects a second post for the same employee/period/year.
+
+        Parameters:
+            data (dict): employee_id, amount (days), year (int), period ('OLD' or 'NEW'),
+                         remarks (optional str).
+
+        Returns:
+            dict: statusCode 201 with the created balance data, or 400/404/409/500 on error.
+        """
+        try:
+            required_fields = ["employee_id", "amount", "year", "period"]  # fields that must be present
+            for field in required_fields:  # loop through required fields
+                if data.get(field) is None:  # check if field is missing
+                    return {"statusCode": 400, "message": f"{field} is required"}  # return 400 if missing
+
+            employee_id = int(data["employee_id"])  # cast to int for safety
+            amount = float(data["amount"])  # cast to float for arithmetic
+            year = int(data["year"])  # cast to int for safety
+            period = str(data["period"]).upper()  # normalise to uppercase
+            remarks = data.get("remarks")  # optional free-text notes
+
+            if amount <= 0:  # validate amount is a positive number
+                return {"statusCode": 400, "message": "amount must be greater than 0"}  # return 400 if invalid
+
+            if period not in ("OLD", "NEW"):  # validate period value
+                return {"statusCode": 400, "message": "period must be OLD or NEW"}  # return 400 for unknown period
+
+            employee = fetch_query(  # fetch the employee to verify existence and type
+                "SELECT id, employee_type FROM employees WHERE id = %s", [employee_id]
+            )
+
+            if not employee:  # employee not found
+                return {"statusCode": 404, "message": "Employee not found"}  # return 404
+
+            if employee[0]["employee_type"] != "TEACHING":  # VSC is only for TEACHING employees
+                return {"statusCode": 400, "message": "VSC forwarded balance is only applicable to TEACHING employees"}  # return 400
+
+            vsc_type = fetch_query(  # look up the VSC leave type to get its ID
+                "SELECT id FROM leave_types WHERE code = 'VSC' AND is_active = 1", []
+            )
+
+            if not vsc_type:  # VSC leave type not configured or inactive
+                return {"statusCode": 500, "message": "VSC leave type not found or is inactive"}  # return 500
+
+            vsc_leave_type_id = vsc_type[0]["id"]  # the leave_type_id for VSC
+
+            existing = fetch_query(  # idempotency check: reject duplicate for same employee/period/year
+                """SELECT id FROM leave_credit_transactions
+                   WHERE employee_id = %s
+                     AND leave_type_id = %s
+                     AND source_type = 'FORWARDED_BALANCE'
+                     AND YEAR(transaction_date) = %s
+                     AND remarks LIKE %s""",
+                [employee_id, vsc_leave_type_id, year, f"VSC {period}%"]  # period is embedded in remarks
+            )
+
+            if existing:  # duplicate found — reject to prevent double-posting
+                return {
+                    "statusCode": 409,
+                    "message": f"A VSC {period} forwarded balance for year {year} already exists for this employee",
+                }  # return 409 Conflict
+
+            vsc_table = (  # choose the period balance table based on the requested period
+                "vsc_old_credit_balances" if period == "OLD" else "vsc_new_credit_balances"
+            )
+
+            full_remarks = f"VSC {period} forwarded balance for {year}"  # base remarks string; period prefix used for idempotency check
+            if remarks:  # append caller-supplied remarks if provided
+                full_remarks = f"{full_remarks} - {remarks}"  # append with dash separator (latin1-safe)
+
+            balance_result = query_insert(  # insert the forwarded balance row into the VSC period table
+                f"""INSERT INTO {vsc_table}
+                       (service_credit_application_id, employee_id, original_balance, remaining_balance, remarks)
+                   VALUES (NULL, %s, %s, %s, %s)""",
+                [employee_id, amount, amount, full_remarks]  # NULL SCA ID marks this as a system-posted entry
+            )
+
+            if balance_result["statusCode"] != 200:  # check if the balance table insert failed
+                return balance_result  # return the error from the gateway
+
+            balance_row_id = balance_result["insertId"]  # capture the new balance row ID for the ledger source_id
+
+            txn_result = query_insert(  # post the CREDIT entry to the ledger
+                """INSERT INTO leave_credit_transactions
+                       (transaction_number, employee_id, leave_type_id, transaction_type,
+                        amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+                   VALUES (%s, %s, %s, 'CREDIT', %s, 'FORWARDED_BALANCE', %s, %s, 0, %s)""",
+                [
+                    ServiceCreditApplication._generate_transaction_number(),  # unique transaction number
+                    employee_id,          # employee receiving the forwarded balance
+                    vsc_leave_type_id,    # VSC leave type
+                    amount,              # days being forwarded
+                    balance_row_id,      # source_id: the VSC balance table row just inserted
+                    f"{year}-01-01",     # transaction date set to Jan 1 of the forwarded year
+                    full_remarks,        # remarks carried into the ledger for the audit trail
+                ]
+            )
+
+            if txn_result["statusCode"] != 200:  # check if the ledger insert failed
+                return txn_result  # return the error
+
+            recalculate_ledger_snapshots(employee_id, vsc_leave_type_id)  # rebuild snapshots and update cached balance
+
+            return {  # return success response
+                "statusCode": 201,  # 201 Created
+                "message": f"VSC {period} forwarded balance of {amount} day(s) posted for year {year}",  # confirmation
+                "data": {
+                    "employee_id": employee_id,   # the employee this was posted for
+                    "period": period,              # OLD or NEW
+                    "year": year,                 # the year being forwarded
+                    "amount": amount,             # days credited
+                    "balance_table": vsc_table,   # which period table the row was inserted into
+                    "balance_row_id": balance_row_id,  # the new balance table row ID
+                    "remarks": full_remarks,      # the full remarks string posted to both tables
+                },
             }
 
         except Exception as e:  # catch unexpected errors
