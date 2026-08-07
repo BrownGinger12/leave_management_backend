@@ -232,12 +232,12 @@ class AnnualLeaveCredit:
             for emp in employees:  # iterate each eligible employee
                 emp_id = emp["id"]  # employee primary key
 
-                # Idempotency: check if a MONTHLY_CREDIT for VL already exists this month
-                already = fetch_query(  # one check on VL covers both VL and SL (posted together)
-                    """SELECT id FROM leave_credit_transactions
+                # Idempotency: the UNIQUE KEY on monthly_leave_credits (employee, leave_type, year, month)
+                # is the authoritative guard — check VL row; if it exists both VL and SL were already posted
+                already = fetch_query(  # one check on VL covers both (they are posted together)
+                    """SELECT id FROM monthly_leave_credits
                        WHERE employee_id = %s AND leave_type_id = %s
-                         AND source_type = 'MONTHLY_CREDIT'
-                         AND YEAR(transaction_date) = %s AND MONTH(transaction_date) = %s
+                         AND year = %s AND month = %s
                        LIMIT 1""",
                     [emp_id, vl_id, year, month]
                 )
@@ -246,41 +246,55 @@ class AnnualLeaveCredit:
                     continue
 
                 # ── Post VL credit ───────────────────────────────────────────
-                vl_result = query_insert(  # insert 1.25 days VL CREDIT
+                vl_result = query_insert(  # insert 1.25 days VL CREDIT into the ledger
                     """INSERT INTO leave_credit_transactions
                            (transaction_number, employee_id, leave_type_id, transaction_type,
                             amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
                        VALUES (%s, %s, %s, 'CREDIT', 1.25, 'MONTHLY_CREDIT', %s, %s, 0, %s)""",
                     [
-                        AnnualLeaveCredit._generate_transaction_number(),          # unique TXN number
-                        emp_id,                                                     # employee being credited
-                        vl_id,                                                      # VL leave type
-                        year,                                                       # source_id = year (no source document)
-                        credit_date,                                                # 1st of the month
-                        f"Monthly VL Credit — {year}-{month:02d}",                 # audit remark
+                        AnnualLeaveCredit._generate_transaction_number(),  # unique TXN number
+                        emp_id,                                             # employee being credited
+                        vl_id,                                              # VL leave type
+                        year,                                               # source_id = year
+                        credit_date,                                        # 1st of the month
+                        f"Monthly VL Credit — {year}-{month:02d}",         # audit remark
                     ]
                 )
                 if vl_result["statusCode"] != 200:  # VL insert failed — skip this employee
                     continue
                 recalculate_ledger_snapshots(emp_id, vl_id)  # update VL balance cache
 
+                query(  # record VL credit in monthly_leave_credits
+                    """INSERT INTO monthly_leave_credits
+                           (employee_id, leave_type_id, year, month, amount, transaction_id)
+                       VALUES (%s, %s, %s, %s, 1.25, %s)""",
+                    [emp_id, vl_id, year, month, vl_result["insertId"]]
+                )
+
                 # ── Post SL credit ───────────────────────────────────────────
-                sl_result = query_insert(  # insert 1.25 days SL CREDIT
+                sl_result = query_insert(  # insert 1.25 days SL CREDIT into the ledger
                     """INSERT INTO leave_credit_transactions
                            (transaction_number, employee_id, leave_type_id, transaction_type,
                             amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
                        VALUES (%s, %s, %s, 'CREDIT', 1.25, 'MONTHLY_CREDIT', %s, %s, 0, %s)""",
                     [
-                        AnnualLeaveCredit._generate_transaction_number(),          # unique TXN number
-                        emp_id,                                                     # employee being credited
-                        sl_id,                                                      # SL leave type
-                        year,                                                       # source_id = year
-                        credit_date,                                                # 1st of the month
-                        f"Monthly SL Credit — {year}-{month:02d}",                 # audit remark
+                        AnnualLeaveCredit._generate_transaction_number(),  # unique TXN number
+                        emp_id,                                             # employee being credited
+                        sl_id,                                              # SL leave type
+                        year,                                               # source_id = year
+                        credit_date,                                        # 1st of the month
+                        f"Monthly SL Credit — {year}-{month:02d}",         # audit remark
                     ]
                 )
                 if sl_result["statusCode"] == 200:  # SL insert succeeded
                     recalculate_ledger_snapshots(emp_id, sl_id)  # update SL balance cache
+
+                    query(  # record SL credit in monthly_leave_credits
+                        """INSERT INTO monthly_leave_credits
+                               (employee_id, leave_type_id, year, month, amount, transaction_id)
+                           VALUES (%s, %s, %s, %s, 1.25, %s)""",
+                        [emp_id, sl_id, year, month, sl_result["insertId"]]
+                    )
 
                 credited += 1  # count this employee as credited
 

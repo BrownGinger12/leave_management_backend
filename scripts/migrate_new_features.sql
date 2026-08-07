@@ -17,10 +17,15 @@ CREATE TABLE IF NOT EXISTS application_number_sequences (
     PRIMARY KEY (year, seq_type)                  -- one row per year per type
 );
 
--- 2. Implementing Unit field on employees (nullable — not all employees are IU)
+-- 2. Implementing Unit field on employees — FK to schools.id (nullable)
 ALTER TABLE employees
-    ADD COLUMN IF NOT EXISTS implementing_unit VARCHAR(255) NULL
+    ADD COLUMN IF NOT EXISTS implementing_unit INT NULL
     AFTER school_id;
+
+ALTER TABLE employees
+    ADD CONSTRAINT IF NOT EXISTS fk_emp_implementing_unit
+    FOREIGN KEY (implementing_unit) REFERENCES schools (id)
+    ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- 2b. Sex field on employees (nullable — MALE or FEMALE)
 ALTER TABLE employees
@@ -58,6 +63,15 @@ ALTER TABLE leave_applications
     ADD CONSTRAINT IF NOT EXISTS fk_app_submitted_by
     FOREIGN KEY (submitted_by) REFERENCES users (id)
     ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- 7. Add reason column to leave_approvals and remarks column to leave_applications
+ALTER TABLE leave_approvals
+    ADD COLUMN IF NOT EXISTS reason TEXT NULL AFTER remarks;
+
+ALTER TABLE leave_applications
+    ADD COLUMN IF NOT EXISTS remarks TEXT NULL AFTER reason;
+
+-- (original note below)
 
 -- 6. Rename hours_rendered → days_rendered on service_credit_applications (1:1 credit, no 1.5x multiplier)
 ALTER TABLE service_credit_applications

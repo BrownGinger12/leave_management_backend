@@ -13,13 +13,15 @@ class LeaveApproval(BaseModel):
         approver_id: FK to the employee making the approval decision.
         level: Approval level (1 = immediate supervisor, 2 = HR, etc.).
         status: Decision — APPROVED or REJECTED.
-        remarks: Optional remarks from the approver.
+        remarks: Optional general remarks from the approver.
+        reason: Optional reason for the decision (any status).
     """
     leave_application_id: int  # FK to leave_applications table
     approver_id: int  # FK to employees table (the approver)
     level: int  # approval level number
     status: str  # APPROVED or REJECTED
-    remarks: Optional[str] = None  # optional remarks from the approver
+    remarks: Optional[str] = None  # optional general remarks from the approver
+    reason: Optional[str] = None  # optional reason for the decision (any status)
 
     # --------------------------
     # Generate transaction number
@@ -506,7 +508,7 @@ class LeaveApproval(BaseModel):
         Parameters:
             data (dict): Decision fields — leave_application_id, approver_id, level,
                          status (FOR HRMO ACTION | FOR APPROVAL | APPROVED | RETURNED | DISAPPROVED),
-                         remarks (optional).
+                         remarks (optional general notes), reason (optional — any status).
 
         Returns:
             dict: statusCode 200 with the approval record, or an error dict.
@@ -591,14 +593,15 @@ class LeaveApproval(BaseModel):
 
             insert_result = query_insert(  # insert the approval record
                 """INSERT INTO leave_approvals
-                       (leave_application_id, approver_id, level, status, remarks, approved_at)
-                   VALUES (%s, %s, %s, %s, %s, NOW())""",
+                       (leave_application_id, approver_id, level, status, remarks, reason, approved_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, NOW())""",
                 [
                     data["leave_application_id"],  # the application being acted on
                     data["approver_id"],           # the approver
                     data["level"],                 # approval level
                     new_status,                    # the decision
-                    data.get("remarks"),           # optional remarks
+                    data.get("remarks"),           # optional general remarks from the approver
+                    data.get("reason"),            # optional reason explaining a rejection or return
                 ]
             )
 
@@ -663,9 +666,9 @@ class LeaveApproval(BaseModel):
 
             # reversed → reversed (e.g. RETURNED → DISAPPROVED) or active → active: no balance change
 
-            query(  # update the leave application status; reuse approver_id as status_updated_by
-                "UPDATE leave_applications SET status = %s, status_updated_by = %s WHERE id = %s",
-                [new_status, data["approver_id"], data["leave_application_id"]]
+            query(  # update the leave application status, reason, and status_updated_by
+                "UPDATE leave_applications SET status = %s, reason = %s, status_updated_by = %s WHERE id = %s",
+                [new_status, data.get("reason"), data["approver_id"], data["leave_application_id"]]
             )
 
             approval = fetch_query(  # fetch the full approval record just inserted

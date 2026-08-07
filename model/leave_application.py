@@ -15,6 +15,7 @@ class LeaveApplication(BaseModel):
         leave_type_id: FK to the requested leave type.
         date_filed: Date the application was submitted (YYYY-MM-DD).
         reason: Employee's stated reason for the leave.
+        remarks: Optional additional notes on the application.
         other_leave_description: Extra description when leave type is Others (optional).
         dates: List of leave date entries; each must have leave_date, duration_type,
                half_day_period (required if HALF_DAY), and is_paid.
@@ -22,7 +23,8 @@ class LeaveApplication(BaseModel):
     employee_id: int  # FK to employees table
     leave_type_id: int  # FK to leave_types table
     date_filed: str  # date the application was filed
-    reason: str  # reason for the leave
+    reason: Optional[str] = None  # optional reason for the leave
+    remarks: Optional[str] = None  # optional additional notes on the application
     other_leave_description: Optional[str] = None  # extra description for Others leave type
     dates: list = []  # list of individual leave date entries
 
@@ -991,7 +993,7 @@ class LeaveApplication(BaseModel):
         """
         try:
             # --- Step 1: validate required header fields ---
-            required_fields = ["employee_id", "leave_type_id", "date_filed", "reason", "dates"]  # mandatory keys
+            required_fields = ["employee_id", "leave_type_id", "date_filed", "dates"]  # mandatory keys
             for field in required_fields:  # check each required field
                 if field not in data or (not data[field] and data[field] != 0):  # missing or empty
                     return {"statusCode": 400, "message": f"{field} is required"}  # reject immediately
@@ -1092,14 +1094,15 @@ class LeaveApplication(BaseModel):
             result = query_insert(  # insert the leave application
                 """INSERT INTO leave_applications
                        (application_number, employee_id, leave_type_id, date_filed,
-                        reason, other_leave_description, status, submitted_by)
-                   VALUES (%s, %s, %s, %s, %s, %s, 'FOR HRMO ACTION', %s)""",
+                        reason, remarks, other_leave_description, status, submitted_by)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, 'FOR HRMO ACTION', %s)""",
                 [
                     application_number,                   # generated application number
                     data["employee_id"],                  # employee submitting the application
                     data["leave_type_id"],                # leave type requested
                     data["date_filed"],                   # date filed
-                    data["reason"],                       # reason for leave
+                    data.get("reason"),                    # optional reason for leave
+                    data.get("remarks"),                  # optional additional notes
                     data.get("other_leave_description"),  # extra description for Others type
                     data.get("submitted_by"),             # FK to users.id — user who filed this application
                 ]
@@ -1365,7 +1368,9 @@ class LeaveApplication(BaseModel):
                               transaction_date
                        FROM leave_credit_transactions
                        WHERE employee_id = %s AND leave_type_id = %s AND YEAR(transaction_date) = %s
-                       ORDER BY transaction_date ASC, id ASC""",
+                       ORDER BY transaction_date ASC,
+                                FIELD(source_type, 'UNDERTIME_TARDINESS') ASC,
+                                id ASC""",
                     [employee_id, lt_id, year]
                 ) or []
 
@@ -1518,8 +1523,12 @@ class LeaveApplication(BaseModel):
                     app["sl_balance_after"] = bal_at_date(sl_snaps, app_date, sl_opening)  # SL at filing date
 
             # --- UT deductions with computed balance_after ---
-            ut_deductions = [
-                {
+            ut_deductions = []  # build list iteratively to support per-row balance fallback
+            for ut in ut_rows:  # iterate each undertime/tardiness entry
+                vl_bal = vl_ut_debit.get(ut["id"])  # look up the running VL balance at this deduction
+                if vl_bal is None:  # fallback: key mismatch or UT debit not in vl_ledger
+                    vl_bal = bal_at_date(vl_snaps, str(ut["deduction_date"]), vl_opening)  # use date-based snapshot
+                ut_deductions.append({
                     "id":                 ut["id"],  # deduction primary key
                     "application_number": ut["application_number"],  # UTD-XXXXXXXX reference
                     "undertime_points":   float(ut["undertime_points"]),  # undertime days
@@ -1528,10 +1537,10 @@ class LeaveApplication(BaseModel):
                     "vl_deducted":        float(ut["vl_deducted"]),  # VL days actually deducted
                     "deduction_date":     str(ut["deduction_date"]),  # effective date
                     "remarks":            ut.get("remarks"),  # optional notes
-                    "balance_after":      vl_ut_debit.get(ut["id"]),  # computed VL balance after this deduction
-                }
-                for ut in ut_rows
-            ]
+                    "balance_after":      vl_bal,  # computed VL balance after this deduction
+                    "vl_balance_after":   vl_bal,  # same value — alias for frontend consistency
+                    "sl_balance_after":   bal_at_date(sl_snaps, str(ut["deduction_date"]), sl_opening),  # SL at deduction date
+                })
 
             # --- Manual balance adjustments (DEBIT/CREDIT) for this year ---
             manual_adj_rows = fetch_query(  # fetch all non-deleted manual adjustments for this employee and year

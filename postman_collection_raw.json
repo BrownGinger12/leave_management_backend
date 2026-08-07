@@ -2452,6 +2452,42 @@
             "response": []
           },
           {
+            "name": "Export Deductions (Excel)",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/undertime-tardiness/export?date_from=2026-01-01&date_to=2026-12-31",
+                "host": [
+                  "{{base_url}}"
+                ],
+                "path": [
+                  "undertime-tardiness",
+                  "export"
+                ],
+                "query": [
+                  {
+                    "key": "date_from",
+                    "value": "2026-01-01",
+                    "description": "Start of deduction_date range (YYYY-MM-DD, required)"
+                  },
+                  {
+                    "key": "date_to",
+                    "value": "2026-12-31",
+                    "description": "End of deduction_date range (YYYY-MM-DD, required)"
+                  }
+                ]
+              },
+              "description": "Downloads an Excel report of tardiness/undertime deductions for the given date range using the official DepEd template. Returns a .xlsx file attachment. ADMIN and DIVISION_PERSONNEL."
+            },
+            "response": []
+          },
+          {
             "name": "Delete Deduction",
             "request": {
               "method": "DELETE",
@@ -2472,6 +2508,166 @@
                 ]
               },
               "description": "Soft-deletes a deduction record and restores the deducted VL balance. ADMIN only."
+            },
+            "response": []
+          }
+        ]
+      },
+      {
+        "name": "Leave Balances",
+        "item": [
+          {
+            "name": "Export Leave Balances (Excel)",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-balances/export",
+                "host": ["{{base_url}}"],
+                "path": ["leave-balances", "export"],
+                "query": [
+                  {"key": "as_of", "value": "2026-08-07", "disabled": true, "description": "Optional: date to show in the report header (YYYY-MM-DD). Defaults to today."}
+                ]
+              },
+              "description": "Downloads an Excel report of current leave balances for all active employees using the official DepEd LEAVE BALANCES template. VL, SL, VSC (old/new split), COC, WL, SPL, FL, and Solo Parent Leave columns included. Use Send and Download in Postman. ADMIN, DIVISION_PERSONNEL, and PAYROLL."
+            },
+            "response": []
+          }
+        ]
+      },
+      {
+        "name": "Leave Transactions",
+        "item": [
+          {
+            "name": "Export Leave Transactions (Excel)",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-transactions/export?date_from=2026-01-01&date_to=2026-12-31",
+                "host": ["{{base_url}}"],
+                "path": ["leave-transactions", "export"],
+                "query": [
+                  {"key": "date_from", "value": "2026-01-01", "description": "Start of leave date range (YYYY-MM-DD). Defaults to Jan 1 of current year."},
+                  {"key": "date_to", "value": "2026-12-31", "description": "End of leave date range (YYYY-MM-DD). Defaults to Dec 31 of current year."}
+                ]
+              },
+              "description": "Downloads an Excel report of all leave applications whose leave dates fall within the given range, using the official DepEd LEAVE TRANSACTIONS template. Each row is one application. Column K lists all individual leave dates incurred (comma-separated). Use Send and Download in Postman. ADMIN, DIVISION_PERSONNEL, and PAYROLL."
+            },
+            "response": []
+          }
+        ]
+      },
+      {
+        "name": "Leave Without Pay",
+        "item": [
+          {
+            "name": "Get Teaching LWOP (Paginated)",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-without-pay/teaching?date_from=2026-01-01&date_to=2026-12-31&page=1&limit=10",
+                "host": ["{{base_url}}"],
+                "path": ["leave-without-pay", "teaching"],
+                "query": [
+                  {"key": "date_from", "value": "2026-01-01"},
+                  {"key": "date_to", "value": "2026-12-31"},
+                  {"key": "school_type", "value": "REGULAR", "disabled": true},
+                  {"key": "page", "value": "1"},
+                  {"key": "limit", "value": "10"}
+                ]
+              },
+              "description": "Returns paginated LWOP date records for TEACHING employees within the date range. Optional school_type filter: REGULAR, IU, SHS. PAYROLL only."
+            },
+            "response": []
+          },
+          {
+            "name": "Export Teaching LWOP (Excel)",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-without-pay/teaching/export?date_from=2026-01-01&date_to=2026-12-31",
+                "host": ["{{base_url}}"],
+                "path": ["leave-without-pay", "teaching", "export"],
+                "query": [
+                  {"key": "date_from", "value": "2026-01-01", "description": "Start of LWOP date range (YYYY-MM-DD)"},
+                  {"key": "date_to", "value": "2026-12-31", "description": "End of LWOP date range (YYYY-MM-DD)"},
+                  {"key": "school_type", "value": "REGULAR", "disabled": true, "description": "Optional: REGULAR, IU, or SHS"}
+                ]
+              },
+              "description": "Downloads an Excel report of TEACHING leave-without-pay applications for the given date range using the official DepEd template. Returns a .xlsx file. Use Send and Download in Postman. ADMIN, DIVISION_PERSONNEL, and PAYROLL."
+            },
+            "response": []
+          },
+          {
+            "name": "Get Non-Teaching LWOP (Paginated)",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-without-pay/non-teaching?date_from=2026-01-01&date_to=2026-12-31&page=1&limit=10",
+                "host": ["{{base_url}}"],
+                "path": ["leave-without-pay", "non-teaching"],
+                "query": [
+                  {"key": "date_from", "value": "2026-01-01"},
+                  {"key": "date_to", "value": "2026-12-31"},
+                  {"key": "school_type", "value": "REGULAR", "disabled": true},
+                  {"key": "page", "value": "1"},
+                  {"key": "limit", "value": "10"}
+                ]
+              },
+              "description": "Returns paginated LWOP date records for NON_TEACHING employees within the date range. Optional school_type filter: REGULAR, IU, SHS. PAYROLL only."
+            },
+            "response": []
+          },
+          {
+            "name": "Export Non-Teaching LWOP (Excel)",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/leave-without-pay/non-teaching/export?date_from=2026-01-01&date_to=2026-12-31",
+                "host": ["{{base_url}}"],
+                "path": ["leave-without-pay", "non-teaching", "export"],
+                "query": [
+                  {"key": "date_from", "value": "2026-01-01", "description": "Start of LWOP date range (YYYY-MM-DD)"},
+                  {"key": "date_to", "value": "2026-12-31", "description": "End of LWOP date range (YYYY-MM-DD)"},
+                  {"key": "school_type", "value": "REGULAR", "disabled": true, "description": "Optional: REGULAR, IU, or SHS"}
+                ]
+              },
+              "description": "Downloads an Excel report of NON_TEACHING leave-without-pay applications for the given date range using the official DepEd template. Unpaid days are split into VL (col M) and SL (col N). Returns a .xlsx file. Use Send and Download in Postman. ADMIN, DIVISION_PERSONNEL, and PAYROLL."
             },
             "response": []
           }

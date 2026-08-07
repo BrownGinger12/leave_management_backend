@@ -42,9 +42,7 @@ def get_employees_paginated():
     try:
         page     = request.args.get("page",     default=1,    type=int)   # read page number from query string
         limit    = request.args.get("limit",    default=10,   type=int)   # read page size from query string
-        division = request.args.get("division", default=None, type=str)   # optional division filter (partial match)
-
-        response = Employee.get_paginated(page=page, limit=limit, division=division)  # delegate to the Employee model
+        response = Employee.get_paginated(page=page, limit=limit)  # delegate to the Employee model
 
         if response["statusCode"] != 200:  # check if the model returned an error
             return jsonify({"message": response.get("message", "Error fetching employees")}), response["statusCode"]
@@ -190,12 +188,10 @@ def search_employees():
         query_str = request.args.get("query",    default="",   type=str)  # read search keyword from query string
         page      = request.args.get("page",     default=1,    type=int)  # read page number from query string
         limit     = request.args.get("limit",    default=10,   type=int)  # read page size from query string
-        division  = request.args.get("division", default=None, type=str)  # optional division filter (partial match)
-
         if not query_str or query_str.strip() == "":  # validate that a search keyword was provided
             return jsonify({"message": "Query parameter is required"}), 400  # return 400 if missing
 
-        response = Employee.search(query_str.strip(), page=page, limit=limit, division=division)  # delegate to the Employee model
+        response = Employee.search(query_str.strip(), page=page, limit=limit)  # delegate to the Employee model
 
         if response["statusCode"] != 200:  # check if the model returned an error
             return jsonify({"message": response.get("message", "Error searching employees")}), response["statusCode"]

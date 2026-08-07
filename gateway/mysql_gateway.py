@@ -129,11 +129,13 @@ def recalculate_ledger_snapshots(employee_id: int, leave_type_id: int) -> float:
     Returns:
         float: The final running balance after all transactions are applied in order.
     """
-    rows = fetch_query(  # fetch all transactions for this employee/leave type in chronological order
+    rows = fetch_query(  # fetch all transactions in chronological order; UT debits sort after leave debits on same date
         """SELECT id, transaction_type, amount
            FROM leave_credit_transactions
            WHERE employee_id = %s AND leave_type_id = %s
-           ORDER BY transaction_date ASC, id ASC""",
+           ORDER BY transaction_date ASC,
+                    FIELD(source_type, 'UNDERTIME_TARDINESS') ASC,
+                    id ASC""",
         [employee_id, leave_type_id]
     )
 

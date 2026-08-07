@@ -27,7 +27,6 @@ class Employee(BaseModel):
         employee_type: TEACHING or NON_TEACHING.
         employment_status: Employment status (e.g. PERMANENT, TEMPORARY).
         school_id: Foreign key reference to the school/office.
-        division: Division name (optional).
         original_appointment: Date of original appointment (optional).
         latest_appointment: Date of latest appointment (optional).
         position: Job position/title (optional).
@@ -38,7 +37,7 @@ class Employee(BaseModel):
     """
     id: Optional[int] = None  # primary key, set by the database
     leave_card_number: Optional[str] = None  # system-generated, set on create
-    employee_number: str  # DepEd-assigned employee number
+    employee_number: Optional[str] = None  # DepEd-assigned employee number (optional)
     first_name: str  # employee's first name
     last_name: str  # employee's last name
     middle_name: Optional[str] = None  # middle name, optional
@@ -47,14 +46,13 @@ class Employee(BaseModel):
     employee_type: str  # TEACHING or NON_TEACHING
     employment_status: str  # e.g. PERMANENT, TEMPORARY, CASUAL
     school_id: int  # foreign key to the school/office
-    division: Optional[str] = None  # division name, optional
     original_appointment: Optional[str] = None  # date of original appointment (YYYY-MM-DD), optional
     latest_appointment: Optional[str] = None  # date of latest appointment (YYYY-MM-DD), optional
     position: Optional[str] = None  # job position or title, optional
     salary: Optional[float] = None  # monthly salary, optional
     contact_number: Optional[str] = None  # employee contact number, optional
     notes: Optional[str] = None  # free-text notes about the employee, optional
-    implementing_unit: Optional[str] = None  # Implementing Unit where the employee is deployed (optional)
+    implementing_unit: Optional[int] = None  # FK to schools.id — Implementing Unit where the employee is deployed (optional)
     is_active: Optional[bool] = True  # True = active, False = soft-deleted
     photo: Optional[str] = None  # path/URL to the employee's photo, optional
 
@@ -115,19 +113,20 @@ class Employee(BaseModel):
             dict: statusCode 201 with the created employee data, or an error dict.
         """
         try:
-            required_fields = ["employee_number", "first_name", "last_name", "email",
+            required_fields = ["first_name", "last_name", "email",
                                 "employee_type", "employment_status", "school_id"]  # fields that must be present
 
             for field in required_fields:  # loop through required fields
                 if not data.get(field):  # check if field is missing or empty
                     return {"statusCode": 400, "message": f"{field} is required"}  # return 400 if missing
 
-            existing = fetch_query(  # check if an employee with the same employee_number already exists
-                "SELECT id FROM employees WHERE employee_number = %s", [data["employee_number"]]
-            )
-
-            if existing:  # if a match is found, reject the request
-                return {"statusCode": 409, "message": f"Employee with employee number '{data['employee_number']}' already exists"}  # return 409 Conflict
+            emp_num = data.get("employee_number") or None  # treat empty string as None
+            if emp_num:  # only check uniqueness when a number is provided
+                existing = fetch_query(  # check if an employee with the same employee_number already exists
+                    "SELECT id FROM employees WHERE employee_number = %s", [emp_num]
+                )
+                if existing:  # if a match is found, reject the request
+                    return {"statusCode": 409, "message": f"Employee with employee number '{emp_num}' already exists"}  # return 409 Conflict
 
             leave_card_number = data.get("leave_card_number") or Employee._generate_leave_card_number()  # use provided leave card number or auto-generate one
 
@@ -139,12 +138,12 @@ class Employee(BaseModel):
                 """INSERT INTO employees
                        (leave_card_number, employee_number, first_name, last_name,
                         middle_name, sex, email, employee_type, employment_status, school_id,
-                        implementing_unit, division, original_appointment, latest_appointment,
+                        implementing_unit, original_appointment, latest_appointment,
                         position, salary, contact_number, notes, is_active, photo)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 [
                     leave_card_number,                        # generated leave card number
-                    data["employee_number"],                  # DepEd employee number
+                    emp_num,                                  # DepEd employee number (may be None)
                     data["first_name"],                       # first name
                     data["last_name"],                        # last name
                     data.get("middle_name"),                  # middle name, may be None
@@ -153,8 +152,7 @@ class Employee(BaseModel):
                     data["employee_type"],                    # TEACHING or NON_TEACHING
                     data["employment_status"],                # employment status
                     data["school_id"],                        # school/office ID
-                    data.get("implementing_unit"),            # IU name where deployed, may be None
-                    data.get("division"),                     # division name, may be None
+                    data.get("implementing_unit"),            # FK to schools.id — IU where deployed, may be None
                     data.get("original_appointment"),         # date of original appointment, may be None
                     data.get("latest_appointment"),           # date of latest appointment, may be None
                     data.get("position"),                     # job position or title, may be None
@@ -188,16 +186,15 @@ class Employee(BaseModel):
 
     @staticmethod
     def get_paginated(page: int = 1, limit: int = 10, school_id: int = None,
-                      division: str = None) -> dict:
+                      ) -> dict:
         """
         Retrieves a paginated list of employees ordered by last name.
-        Supports optional filters: school_id and/or division (partial match).
+        Supports optional filter: school_id.
 
         Parameters:
             page (int): The page number to retrieve (default 1).
             limit (int): The number of records per page (default 10).
             school_id (int): Optional — restrict to employees belonging to this school.
-            division (str): Optional — restrict to employees whose division contains this string (case-insensitive).
 
         Returns:
             dict: statusCode 200 with data list and pagination info, or 404 if no records found.
@@ -218,10 +215,6 @@ class Employee(BaseModel):
                     return {"statusCode": 404, "message": f"School {school_id} not found"}  # return 404
                 conditions.append("school_id = %s")  # add school condition
                 params.append(school_id)  # bind school_id
-
-            if division:  # filter by division substring when provided
-                conditions.append("division LIKE %s")  # partial match on division field
-                params.append(f"%{division.strip()}%")  # wrap in wildcards for LIKE
 
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""  # assemble WHERE or empty
 
@@ -248,7 +241,6 @@ class Employee(BaseModel):
                 "limit": limit,  # records per page
                 "filters": {  # echo back applied filters for the frontend
                     "school_id": school_id,  # school filter value (or None)
-                    "division": division or None,  # division filter value (or None)
                 },
                 "data": [Employee._with_signed_photo(row) for row in rows],  # employee records with signed photo URLs
             }
@@ -335,7 +327,7 @@ class Employee(BaseModel):
             allowed_fields = [  # fields that are permitted to be updated
                 "first_name", "last_name", "middle_name", "sex",
                 "email", "employee_type", "employment_status", "school_id",
-                "implementing_unit", "division", "original_appointment", "latest_appointment",
+                "implementing_unit", "original_appointment", "latest_appointment",
                 "position", "salary", "contact_number", "notes", "is_active", "photo"
             ]
 
@@ -383,7 +375,19 @@ class Employee(BaseModel):
     @staticmethod
     def delete(employee_id: int) -> dict:
         """
-        Deletes an employee record from the database by its primary key.
+        Permanently deletes an employee and ALL related data from the database.
+        Cascades through every table that references the employee, in dependency
+        order, to avoid foreign key violations.
+
+        Deletion order:
+          1. Child rows of leave_applications (dates, approvals, refunded dates,
+             CTO/VSC deduction logs)
+          2. leave_applications
+          3. Child rows of service_credit_applications (credit balances, dates)
+          4. service_credit_applications
+          5. All remaining employee-scoped tables (balances, ledger, credits,
+             conversions, deductions, user account)
+          6. The employee record itself
 
         Parameters:
             employee_id (int): The primary key of the employee to delete.
@@ -392,24 +396,90 @@ class Employee(BaseModel):
             dict: statusCode 200 with a success message, or an error dict.
         """
         try:
-            check = fetch_query(  # verify the employee exists before deleting
-                "SELECT id FROM employees WHERE id = %s", [employee_id]
+            check = fetch_query(  # verify the employee exists before proceeding
+                "SELECT id, first_name, last_name FROM employees WHERE id = %s",
+                [employee_id]
+            )
+            if not check:  # employee not found — nothing to delete
+                return {"statusCode": 404, "message": "Employee not found"}
+
+            # -- collect child IDs needed for grandchild deletes --
+            la_rows = fetch_query(  # get all leave application IDs for this employee
+                "SELECT id FROM leave_applications WHERE employee_id = %s",
+                [employee_id]
+            ) or []
+            la_ids = [r["id"] for r in la_rows]  # list of leave_application PKs
+
+            sca_rows = fetch_query(  # get all service credit application IDs for this employee
+                "SELECT id FROM service_credit_applications WHERE employee_id = %s",
+                [employee_id]
+            ) or []
+            sca_ids = [r["id"] for r in sca_rows]  # list of service_credit_application PKs
+
+            # -- grandchild tables of leave_applications --
+            if la_ids:  # only run if the employee has leave applications
+                placeholders = ",".join(["%s"] * len(la_ids))  # build IN (%s,...) fragment
+                for tbl in (  # delete each child table in any order (no FK between them)
+                    "cto_deduction_log",
+                    "vsc_deduction_log",
+                    "leave_application_dates",
+                    "leave_approvals",
+                    "leave_refunded_dates",
+                ):
+                    query(  # delete child rows for every leave application of this employee
+                        f"DELETE FROM {tbl} WHERE leave_application_id IN ({placeholders})",
+                        la_ids
+                    )
+
+            query(  # delete all leave applications (and monetizations stored as leave apps)
+                "DELETE FROM leave_applications WHERE employee_id = %s", [employee_id]
             )
 
-            if not check:  # employee not found
-                return {"statusCode": 404, "message": "Employee not found"}  # return 404
+            # -- grandchild tables of service_credit_applications --
+            if sca_ids:  # only run if the employee has service credit applications
+                placeholders = ",".join(["%s"] * len(sca_ids))  # build IN (%s,...) fragment
+                for tbl in (  # delete each credit child table
+                    "cto_credit_balances",
+                    "service_credit_dates",
+                    "vsc_new_credit_balances",
+                    "vsc_old_credit_balances",
+                ):
+                    query(  # delete child rows for every service credit application
+                        f"DELETE FROM {tbl} WHERE service_credit_application_id IN ({placeholders})",
+                        sca_ids
+                    )
 
-            result = query(  # execute the DELETE
+            query(  # delete all service credit applications
+                "DELETE FROM service_credit_applications WHERE employee_id = %s", [employee_id]
+            )
+
+            # -- direct employee-scoped tables --
+            for tbl in (  # delete all remaining tables that reference employee_id directly
+                "employee_leave_balances",
+                "employee_type_conversions",
+                "leave_credit_transactions",
+                "manual_balance_deductions",
+                "monthly_leave_credits",
+                "undertime_tardiness_deductions",
+                "users",  # delete linked user account if one exists
+            ):
+                query(  # delete rows referencing this employee
+                    f"DELETE FROM {tbl} WHERE employee_id = %s", [employee_id]
+                )
+
+            query(  # finally delete the employee record itself
                 "DELETE FROM employees WHERE id = %s", [employee_id]
             )
 
-            if result["statusCode"] == 200:  # check if delete succeeded
-                result["message"] = "Employee deleted"  # attach confirmation message
+            emp = check[0]  # employee record fetched at the start
+            full_name = f"{emp['first_name']} {emp['last_name']}"  # build readable name
+            return {  # return success response
+                "statusCode": 200,
+                "message": f"Employee '{full_name}' and all related data permanently deleted",
+            }
 
-            return result  # return the gateway result
-
-        except Exception as e:  # catch unexpected errors
-            return {"statusCode": 500, "message": str(e)}  # return 500 with error detail
+        except Exception as e:  # catch unexpected errors (FK violations, connection issues)
+            return {"statusCode": 500, "message": str(e)}
 
     # --------------------------
     # Search employees
@@ -417,10 +487,10 @@ class Employee(BaseModel):
 
     @staticmethod
     def search(query_str: str, page: int = 1, limit: int = 10,
-               school_id: int = None, division: str = None) -> dict:
+               school_id: int = None) -> dict:
         """
         Searches employees by first name, last name, employee number, leave card number, or email.
-        Supports optional filters: school_id and/or division (partial match).
+        Supports optional filter: school_id.
         Filters are combined with the keyword search using AND.
 
         Parameters:
@@ -428,7 +498,6 @@ class Employee(BaseModel):
             page (int): The page number to retrieve (default 1).
             limit (int): The number of results per page (default 10).
             school_id (int): Optional — restrict search to this school only.
-            division (str): Optional — restrict search to employees whose division contains this string.
 
         Returns:
             dict: statusCode 200 with matching employee records, or 404 if none found.
@@ -456,10 +525,6 @@ class Employee(BaseModel):
                     return {"statusCode": 404, "message": f"School {school_id} not found"}  # return 404
                 extra_conditions.append("school_id = %s")  # add school filter
                 extra_params.append(school_id)  # bind school_id
-
-            if division:  # restrict to a specific division when provided
-                extra_conditions.append("division LIKE %s")  # partial match on division field
-                extra_params.append(f"%{division.strip()}%")  # wrap in wildcards
 
             # Build the full WHERE clause combining keyword search and optional filters
             if extra_conditions:  # filters present — combine with AND
@@ -492,7 +557,6 @@ class Employee(BaseModel):
                 "limit": limit,  # records per page
                 "filters": {  # echo back applied filters for the frontend
                     "school_id": school_id,  # school filter (or None)
-                    "division": division or None,  # division filter (or None)
                 },
                 "data": [Employee._with_signed_photo(row) for row in rows],  # employees with signed photo URLs
             }

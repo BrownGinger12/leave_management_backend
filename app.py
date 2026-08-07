@@ -24,6 +24,8 @@ from handler import dashboard_handler  # import dashboard and analytics handler 
 from handler import leave_without_pay_handler  # import leave without pay handler functions
 from handler import annual_leave_credit_handler  # import annual leave credit handler functions
 from handler import balance_deduction_handler  # import manual balance deduction handler functions
+from handler import leave_transaction_handler  # import leave transaction export handler functions
+from handler import leave_balance_report_handler  # import leave balance report handler functions
 
 load_dotenv()  # load environment variables from .env file into os.environ
 
@@ -57,12 +59,14 @@ scheduler.add_job(  # register the Jan 1 annual leave credit job
 
 scheduler.add_job(  # register the 1st-of-month VL/SL credit job for NON_TEACHING employees
     func=AnnualLeaveCredit.post_monthly_vl_sl_credits,  # function to call
-    trigger="cron",  # run on a fixed schedule
-    day=1,           # 1st of every month
-    hour=0,          # at midnight
-    minute=3,        # three minutes past midnight
-    id="monthly_vl_sl_credit",  # unique job ID for deduplication
-    replace_existing=True,      # replace if already registered (safe on hot reload)
+    trigger="cron",    # run on a fixed schedule
+    day=1,             # 1st of every month
+    hour=0,            # at 12:50 AM (testing)
+    minute=50,         # fifty minutes past midnight
+    id="monthly_vl_sl_credit",   # unique job ID for deduplication
+    replace_existing=True,       # replace if already registered (safe on hot reload)
+    max_instances=1,             # only one concurrent execution allowed — prevents double-fire on hot reload
+    coalesce=True,               # merge missed fires into a single execution
 )
 
 scheduler.add_job(  # register the Jan 1 year-end balance reset job (WL→5, SPL→3, FL→5 with VL carryover)
@@ -212,6 +216,7 @@ app.add_url_rule("/undertime-tardiness", view_func=undertime_tardiness_handler.c
 app.add_url_rule("/undertime-tardiness", view_func=undertime_tardiness_handler.get_all_undertime_tardiness, methods=["GET"])  # list all deductions (paginated)
 app.add_url_rule("/undertime-tardiness/search", view_func=undertime_tardiness_handler.search_undertime_tardiness, methods=["GET"])  # search by application number or employee
 app.add_url_rule("/undertime-tardiness/filter", view_func=undertime_tardiness_handler.filter_undertime_tardiness, methods=["GET"])  # filter by year, date range, or employee
+app.add_url_rule("/undertime-tardiness/export", view_func=undertime_tardiness_handler.export_undertime_tardiness, methods=["GET"])  # export Excel report for a date range
 app.add_url_rule("/undertime-tardiness/<int:deduction_id>", view_func=undertime_tardiness_handler.get_undertime_tardiness_by_id, methods=["GET"])  # get single deduction by ID
 app.add_url_rule("/undertime-tardiness/<int:deduction_id>", view_func=undertime_tardiness_handler.delete_undertime_tardiness, methods=["DELETE"])  # soft-delete and reverse VL debit (ADMIN only)
 
@@ -270,8 +275,22 @@ app.add_url_rule("/dashboard/pending-applications", view_func=dashboard_handler.
 # Leave Without Pay routes (PAYROLL only)
 # --------------------------
 
+# --------------------------
+# Leave Transaction routes
+# --------------------------
+
+app.add_url_rule("/leave-transactions/export", view_func=leave_transaction_handler.export_leave_transactions, methods=["GET"])  # Excel export of all leave applications whose leave dates fall in the given range
+app.add_url_rule("/leave-balances/export", view_func=leave_balance_report_handler.export_leave_balances, methods=["GET"])  # Excel export of current leave balances for all active employees; optional ?as_of=YYYY-MM-DD
+
+
+# --------------------------
+# Leave Without Pay routes (PAYROLL only)
+# --------------------------
+
 app.add_url_rule("/leave-without-pay/teaching", view_func=leave_without_pay_handler.get_teaching_leave_without_pay, methods=["GET"])  # paginated LWOP dates for TEACHING employees; supports ?date_from, ?date_to, ?page, ?limit, ?school_type
+app.add_url_rule("/leave-without-pay/teaching/export", view_func=leave_without_pay_handler.export_teaching_leave_without_pay, methods=["GET"])  # Excel export of TEACHING LWOP applications for a date range
 app.add_url_rule("/leave-without-pay/non-teaching", view_func=leave_without_pay_handler.get_non_teaching_leave_without_pay, methods=["GET"])  # paginated LWOP dates for NON_TEACHING employees; supports ?date_from, ?date_to, ?page, ?limit, ?school_type
+app.add_url_rule("/leave-without-pay/non-teaching/export", view_func=leave_without_pay_handler.export_non_teaching_leave_without_pay, methods=["GET"])  # Excel export of NON_TEACHING LWOP applications; VL/SL unpaid days split into separate columns
 
 
 # --------------------------

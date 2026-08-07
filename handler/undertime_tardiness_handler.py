@@ -1,4 +1,4 @@
-from flask import request, jsonify  # import request/jsonify for HTTP I/O
+from flask import request, jsonify, send_file  # import request/jsonify for HTTP I/O, send_file for Excel download
 from model.undertime_tardiness import UndertimeTardiness  # import the model
 from gateway.auth_gateway import require_role  # import role decorator
 
@@ -114,6 +114,41 @@ def filter_undertime_tardiness():
 
         result = UndertimeTardiness.filter(filters=filters, page=page, limit=limit)  # delegate to model
         return jsonify(result), result["statusCode"]  # return the model response
+
+    except Exception as e:  # catch unexpected errors
+        return jsonify({"message": str(e)}), 500
+
+
+@require_role("ADMIN", "DIVISION_PERSONNEL")
+def export_undertime_tardiness():
+    """
+    Handles GET /undertime-tardiness/export — generates and downloads an Excel report of
+    tardiness/undertime deductions for a given date range using the official DepEd template.
+    ADMIN and DIVISION_PERSONNEL only.
+    Accepts query params: date_from (YYYY-MM-DD, required), date_to (YYYY-MM-DD, required).
+
+    Returns:
+        An .xlsx file attachment, or a JSON error response.
+    """
+    try:
+        date_from = request.args.get("date_from")  # start of deduction_date range (inclusive)
+        date_to = request.args.get("date_to")  # end of deduction_date range (inclusive)
+
+        if not date_from or not date_to:  # both dates are required for a meaningful report
+            return jsonify({"message": "date_from and date_to query parameters are required"}), 400
+
+        result = UndertimeTardiness.export_to_excel(date_from, date_to)  # generate the Excel workbook
+
+        if isinstance(result, dict):  # model returned an error dict instead of a buffer
+            return jsonify(result), result.get("statusCode", 500)
+
+        filename = f"tardiness_undertime_{date_from}_to_{date_to}.xlsx"  # descriptive download filename
+        return send_file(  # stream the BytesIO buffer as a file download
+            result,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # Excel MIME type
+            as_attachment=True,  # trigger browser download dialog
+            download_name=filename,  # suggested filename for the browser
+        )
 
     except Exception as e:  # catch unexpected errors
         return jsonify({"message": str(e)}), 500

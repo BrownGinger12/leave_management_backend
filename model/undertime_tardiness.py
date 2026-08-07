@@ -383,6 +383,115 @@ class UndertimeTardiness:
             return {"statusCode": 500, "message": str(e)}
 
     # --------------------------
+    # Export to Excel
+    # --------------------------
+
+    @staticmethod
+    def export_to_excel(date_from: str, date_to: str):
+        """
+        Generates an Excel file of tardiness/undertime records for the given date range
+        using the official DepEd template (Template/TARDINESS AND UNDERTIME.xlsx).
+
+        Parameters:
+            date_from (str): Start date of the deduction_date range (YYYY-MM-DD).
+            date_to (str): End date of the deduction_date range (YYYY-MM-DD).
+
+        Returns:
+            io.BytesIO: In-memory Excel file ready to be sent as an attachment.
+            dict: Error dict if a problem occurs before the file is generated.
+        """
+        import os  # used to build the template path
+        import io  # used to create an in-memory byte buffer
+        import openpyxl  # used to load and write the Excel workbook
+        from openpyxl.styles import Border, Side, Font, Alignment  # cell styling classes
+
+        try:
+            rows = fetch_query(  # fetch all non-deleted deductions in the date range
+                """SELECT utd.undertime_points, utd.tardiness_points,
+                          utd.deduction_date, utd.remarks,
+                          e.first_name, e.last_name, e.middle_name, e.sex,
+                          e.position, e.leave_card_number,
+                          s.name AS school_name
+                   FROM undertime_tardiness_deductions utd
+                   JOIN employees e ON e.id = utd.employee_id
+                   LEFT JOIN schools s ON s.id = e.school_id
+                   WHERE utd.is_deleted = 0
+                     AND utd.deduction_date >= %s
+                     AND utd.deduction_date <= %s
+                   ORDER BY utd.deduction_date ASC, e.last_name ASC, e.first_name ASC""",
+                [date_from, date_to]
+            ) or []
+
+            template_path = os.path.join(  # resolve absolute path to the template file
+                os.path.dirname(os.path.dirname(__file__)), "Template", "TARDINESS AND UNDERTIME.xlsx"
+            )
+            wb = openpyxl.load_workbook(template_path)  # load template (preserves header image and formatting)
+            ws = wb.active  # use the first sheet
+
+            # Unmerge the page-counter row (A51:J51) so we can relocate it freely
+            ws.unmerge_cells("A51:J51")  # remove the original merge before writing
+
+            thin = Side(style="thin")  # thin border side style
+            thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)  # all-sides thin border
+
+            DATA_START = 15  # row index where data rows begin in the template
+
+            for i, row in enumerate(rows):  # write one row per deduction record
+                r = DATA_START + i  # absolute sheet row number
+
+                last = (row["last_name"] or "").strip()  # employee last name
+                first = (row["first_name"] or "").strip()  # employee first name
+                middle = (row.get("middle_name") or "").strip()  # employee middle name (may be None)
+                mi = f" {middle[0]}." if middle else ""  # middle initial with period, or empty
+                full_name = f"{last}, {first}{mi}"  # format: LAST, FIRST MI.
+
+                ded_date = row["deduction_date"]  # deduction_date value from MySQL (date object)
+                date_str = ded_date.strftime("%m/%d/%Y") if hasattr(ded_date, "strftime") else str(ded_date)  # format MM/DD/YYYY
+
+                values = [  # ordered by column A–J
+                    i + 1,                                  # A: sequential row number
+                    row.get("leave_card_number") or "",     # B: employee leave card number
+                    full_name,                              # C: formatted employee name
+                    (row.get("sex") or "").capitalize(),    # D: sex (Male / Female)
+                    row.get("position") or "",              # E: position/designation
+                    row.get("school_name") or "",           # F: school or division name
+                    date_str,                               # G: deduction date MM/DD/YYYY
+                    float(row["tardiness_points"]),         # H: tardiness points (days)
+                    float(row["undertime_points"]),         # I: undertime points (days)
+                    row.get("remarks") or "",               # J: optional remarks
+                ]
+
+                for col_idx, val in enumerate(values, start=1):  # write each column cell
+                    cell = ws.cell(row=r, column=col_idx)  # target cell
+                    cell.value = val  # set cell value
+                    cell.border = thin_border  # apply thin border to match header style
+
+            for old_row in [47, 49, 51]:  # clear old static footer rows from template
+                ws.cell(row=old_row, column=1).value = None  # only clear column A (master cell of any merge)
+
+            footer_row = max(47, DATA_START + len(rows) + 3)  # place footer at least at row 47, or below data
+
+            cert_cell = ws.cell(row=footer_row, column=1)  # CERTIFIED CORRECT label cell
+            cert_cell.value = "CERTIFIED CORRECT:"  # footer label
+            cert_cell.font = Font(bold=True)  # bold to match template style
+
+            ws.cell(row=footer_row + 2, column=2).value = "_________________________"  # signature line
+
+            page_row = footer_row + 4  # row for the page counter
+            ws.merge_cells(f"A{page_row}:J{page_row}")  # merge the full row for the page counter label
+            page_cell = ws.cell(row=page_row, column=1)  # write to the master (leftmost) cell of the merge
+            page_cell.value = "page 1 of 1"  # static page label
+            page_cell.alignment = Alignment(horizontal="center")  # centre-align the page label
+
+            buffer = io.BytesIO()  # create an in-memory byte buffer
+            wb.save(buffer)  # write workbook to the buffer
+            buffer.seek(0)  # rewind buffer to the start before reading
+            return buffer  # caller streams this directly as a file download
+
+        except Exception as e:  # catch unexpected errors (file not found, DB error, etc.)
+            return {"statusCode": 500, "message": str(e)}
+
+    # --------------------------
     # Soft delete (reverses VL debit)
     # --------------------------
 
