@@ -1426,7 +1426,7 @@ class LeaveApplication(BaseModel):
                     tx_date = str(row["transaction_date"])  # string representation for comparison
                     lid = row["id"]  # ledger row id
                     snap_list.append((tx_date, lid, running))  # record snapshot at this point
-                    if row["source_type"] == "LEAVE_APPLICATION" and row["transaction_type"] == "DEBIT":  # leave app debit
+                    if row["source_type"] in ("LEAVE_APPLICATION", "MONETIZATION") and row["transaction_type"] == "DEBIT":  # leave app or monetization debit
                         app_debit_map[row["source_id"]] = (lid, running, tx_date)
                     elif row["source_type"] == "UNDERTIME_TARDINESS" and row["transaction_type"] == "DEBIT":  # UT deduction debit
                         ut_debit_map[row["source_id"]] = running
@@ -1521,6 +1521,94 @@ class LeaveApplication(BaseModel):
                     app["balance_after"]    = None  # no single balance column for non-VL/SL types
                     app["vl_balance_after"] = bal_at_date(vl_snaps, app_date, vl_opening)  # VL at filing date
                     app["sl_balance_after"] = bal_at_date(sl_snaps, app_date, sl_opening)  # SL at filing date
+
+            # --- Recompute running VL/SL balances in date_filed order ---
+            # The first pass above uses ledger transaction_date ordering which mismatches
+            # the display order when a leave is filed after its actual leave dates (e.g. a
+            # backdated VL filed on Aug 14 for Aug 1-3 sits after a monetization filed Aug 4
+            # in the display, but the ledger processed the Aug 1 VL debit first). This second
+            # pass recomputes vl_balance_after/sl_balance_after sequentially in date_filed
+            # order so the running balance is consistent with how apps appear on screen.
+            # UT deductions, manual adjustments, and credits are applied at their natural date
+            # position rather than all upfront, so they only affect leave apps filed after them.
+
+            def build_non_app_events(ledger):
+                """
+                Extract non-leave-app balance-change events from the ledger as (date_str, delta) pairs,
+                sorted by date. LEAVE_APPLICATION and MONETIZATION entries are excluded because
+                those debits are applied in date_filed order by the leave-app walk below.
+                """
+                events = []  # list of (date_str, delta) for credits/UT/manual entries
+                for row in ledger:  # already chronological but we re-sort to be safe
+                    if row["source_type"] in ("LEAVE_APPLICATION", "MONETIZATION"):  # skip leave app debits
+                        continue
+                    date  = str(row["transaction_date"])  # effective date of this entry
+                    amt   = float(row["amount"])  # transaction amount
+                    delta = amt if row["transaction_type"] == "CREDIT" else -amt  # positive = credit
+                    events.append((date, delta))
+                events.sort(key=lambda x: x[0])  # sort by date ascending
+                return events
+
+            vl_non_app   = build_non_app_events(vl_ledger)  # VL credits / UT / manual events
+            sl_non_app   = build_non_app_events(sl_ledger)  # SL credits / UT / manual events
+            vl_running   = vl_opening  # start before any this-year transaction
+            sl_running   = sl_opening  # start before any this-year transaction
+            vl_evt_idx   = 0           # pointer into vl_non_app
+            sl_evt_idx   = 0           # pointer into sl_non_app
+
+            for app in enriched:  # enriched is sorted by date_filed ASC — apply debits in that order
+                app_date = str(app["date_filed"])  # filing date used as the sort/display key
+                code     = app["leave_type_code"]  # leave type code (VL, SL, MNT, SPL, etc.)
+                bal_type = app["balance_type"]  # SELF, CHARGED_TO_VL, NONE, etc.
+                status   = app["status"]  # PENDING, APPROVED, RETURNED, DISAPPROVED, etc.
+                is_rev   = status in REVERSED_STATUSES  # True if balance deduction was already reversed
+                eff      = app["effective_days"]  # net chargeable days
+                app_id   = app["id"]  # application primary key
+
+                # Apply non-app VL events (credits, UT, manual) that occurred strictly
+                # before this app's date_filed so they show up in the right position.
+                while vl_evt_idx < len(vl_non_app) and vl_non_app[vl_evt_idx][0] < app_date:
+                    vl_running = round(vl_running + vl_non_app[vl_evt_idx][1], 4)  # apply delta
+                    vl_evt_idx += 1  # advance pointer
+
+                # Same for non-app SL events
+                while sl_evt_idx < len(sl_non_app) and sl_non_app[sl_evt_idx][0] < app_date:
+                    sl_running = round(sl_running + sl_non_app[sl_evt_idx][1], 4)  # apply delta
+                    sl_evt_idx += 1  # advance pointer
+
+                # Only deduct if an approved ledger entry exists for this app (not pending, not reversed)
+                has_vl_debit = (app_id in vl_app_debit) and not is_rev  # VL debit exists and active
+                has_sl_debit = (app_id in sl_app_debit) and not is_rev  # SL debit exists and active
+
+                if bal_type == "CHARGED_TO_VL" or (bal_type == "SELF" and code == "VL"):
+                    if has_vl_debit:  # apply VL deduction only if the application was approved
+                        vl_running = round(vl_running - eff, 4)
+                    app["vl_balance_after"] = vl_running  # running VL balance after this entry
+                    app["sl_balance_after"] = sl_running  # SL is unchanged for this leave type
+                    app["balance_after"]    = vl_running  # primary balance column
+
+                elif bal_type == "SELF" and code == "SL" and app_id not in vsc_funded_sl:
+                    if has_sl_debit:  # apply SL deduction only if the application was approved
+                        sl_running = round(sl_running - eff, 4)
+                    app["vl_balance_after"] = vl_running  # VL is unchanged for this leave type
+                    app["sl_balance_after"] = sl_running  # running SL balance after this entry
+                    app["balance_after"]    = sl_running  # primary balance column
+
+                elif code == "MNT":  # monetization — deducts mnt_vl_days from VL and mnt_sl_days from SL
+                    mnt_vl = float(app.get("mnt_vl_days") or 0.0)  # VL days being monetized
+                    mnt_sl = float(app.get("mnt_sl_days") or 0.0)  # SL days being monetized
+                    if has_vl_debit:  # apply VL deduction if monetization was approved
+                        vl_running = round(vl_running - mnt_vl, 4)
+                    if has_sl_debit:  # apply SL deduction if monetization was approved
+                        sl_running = round(sl_running - mnt_sl, 4)
+                    app["vl_balance_after"] = vl_running  # running VL balance after monetization
+                    app["sl_balance_after"] = sl_running  # running SL balance after monetization
+                    app["balance_after"]    = None  # no single balance column for monetization
+
+                else:  # SPL, WL, PR, VSC-funded SL, etc. — no VL/SL deduction
+                    app["vl_balance_after"] = vl_running  # VL unchanged
+                    app["sl_balance_after"] = sl_running  # SL unchanged
+                    # balance_after already set to None in the first pass above
 
             # --- UT deductions with computed balance_after ---
             ut_deductions = []  # build list iteratively to support per-row balance fallback

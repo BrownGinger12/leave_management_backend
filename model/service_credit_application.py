@@ -845,6 +845,31 @@ class ServiceCreditApplication(BaseModel):
                 for row in (rows or []):  # index by application ID for O(1) lookup
                     app_details[row["id"]] = dict(row)  # store the full row dict
 
+            # Fetch leave dates for all apps and group by leave_application_id
+            leave_dates_map = {app_id: [] for app_id in all_app_ids}  # init empty list per app
+            if all_app_ids:  # only query when there are apps to enrich
+                ld_placeholders = ", ".join(["%s"] * len(all_app_ids))  # build IN clause
+                ld_rows = fetch_query(  # fetch all leave dates for these applications
+                    f"""SELECT id, leave_application_id, leave_date, duration_type,
+                               half_day_period, is_paid, created_at, updated_at
+                        FROM leave_application_dates
+                        WHERE leave_application_id IN ({ld_placeholders})
+                        ORDER BY leave_date ASC""",
+                    all_app_ids
+                )
+                for ld in (ld_rows or []):  # group dates under their parent application
+                    leave_dates_map[ld["leave_application_id"]].append({
+                        "id":              ld["id"],  # date record primary key
+                        "leave_date":      str(ld["leave_date"]),  # ISO date string
+                        "duration_type":   ld["duration_type"],  # FULL_DAY or HALF_DAY
+                        "half_day_period": ld["half_day_period"],  # AM/PM or null
+                        "is_paid":         ld["is_paid"],  # 1 = paid, 0 = without pay
+                        "created_at":      str(ld["created_at"]),  # timestamp
+                        "updated_at":      str(ld["updated_at"]),  # timestamp
+                    })
+            for app_id, detail in app_details.items():  # attach leave_dates list to each app detail
+                detail["leave_dates"] = leave_dates_map.get(app_id, [])  # empty list if no dates
+
             # Build a lookup for the amount each leave application deducted from each specific credit
             deduction_lookup = {}  # key: (leave_application_id, cto_credit_balance_id) -> amount_deducted
             for log in (all_logs or []):  # iterate all deduction log rows
