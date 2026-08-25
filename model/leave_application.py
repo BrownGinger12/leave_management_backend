@@ -1540,8 +1540,8 @@ class LeaveApplication(BaseModel):
                 """
                 events = []  # list of (date_str, delta) for credits/UT/manual entries
                 for row in ledger:  # already chronological but we re-sort to be safe
-                    if row["source_type"] in ("LEAVE_APPLICATION", "MONETIZATION"):  # skip leave app debits
-                        continue
+                    if row["source_type"] in ("LEAVE_APPLICATION", "MONETIZATION", "UNDERTIME_TARDINESS"):  # skip leave app and UT debits
+                        continue  # UT deductions are shown in their own section; they do not affect leave app running balance
                     date  = str(row["transaction_date"])  # effective date of this entry
                     amt   = float(row["amount"])  # transaction amount
                     delta = amt if row["transaction_type"] == "CREDIT" else -amt  # positive = credit
