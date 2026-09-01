@@ -1348,7 +1348,7 @@ class LeaveApplication(BaseModel):
             if vl_leave_type_id:  # only fetch when VL type exists
                 ut_rows = fetch_query(
                     """SELECT id, application_number, undertime_points, tardiness_points,
-                              total_points, vl_deducted, deduction_date, remarks
+                              total_points, vl_deducted, deduction_date, remarks, created_at
                        FROM undertime_tardiness_deductions
                        WHERE employee_id = %s AND YEAR(deduction_date) = %s AND is_deleted = 0
                        ORDER BY deduction_date ASC, id ASC""",
@@ -1528,49 +1528,81 @@ class LeaveApplication(BaseModel):
             # order applying those events at their correct date position before each app.
             # UT deductions are fully excluded — they live in their own section only.
 
-            def build_non_app_events(ledger):
+            # Fetch manual adjustments early so their created_at timestamps are available
+            # as tiebreakers in the pointer walk (build_non_app_events below).
+            manual_adj_rows = fetch_query(  # fetch all non-deleted manual adjustments for this employee and year
+                """SELECT id, deduction_number, leave_type_id, transaction_type,
+                          amount, deduction_date, remarks, created_at
+                   FROM manual_balance_deductions
+                   WHERE employee_id = %s AND YEAR(deduction_date) = %s AND is_deleted = 0
+                   ORDER BY deduction_date ASC, id ASC""",
+                [employee_id, year]
+            ) or []
+
+            # Build created_at maps keyed by source table ID — kept separate per source_type
+            # to avoid ID collisions (each table has its own auto-increment sequence).
+            ut_ts_map     = {ut["id"]:  str(ut["created_at"])  for ut in ut_rows}      # UT deduction id -> created_at
+            manual_ts_map = {adj["id"]: str(adj["created_at"]) for adj in manual_adj_rows}  # manual adj id -> created_at
+
+            def build_non_app_events(ledger, ut_ts, man_ts):
                 """
                 Extract all balance-changing events except leave-app debits from the ledger as
-                (date_str, delta) pairs sorted by date. Applied in date position during the app
-                walk so a manual credit or UT deduction on Aug 10 only affects apps filed on or
-                after Aug 10. UT rows do not appear in leave_applications — they live in their
-                own section — but they DO shift the running VL balance for subsequent apps.
+                (date_str, created_at_str, delta) triples sorted by (date, created_at).
+
+                Using created_at as a secondary sort key means: if a manual credit was posted
+                before an app was filed on the same date it applies first; if posted after the
+                app it is applied after — matching the display order the frontend uses.
+
+                System events (FORWARDED_BALANCE, MONTHLY_CREDIT, ANNUAL_CREDIT,
+                SYSTEM_ADJUSTMENT) use an empty created_at string so they always sort
+                before any user-created record on the same date.
 
                 Parameters:
                     ledger (list): Ledger rows for a single leave type.
+                    ut_ts  (dict): {undertime_tardiness_deductions.id -> created_at str}.
+                    man_ts (dict): {manual_balance_deductions.id -> created_at str}.
 
                 Returns:
-                    list[tuple[str, float]]: Sorted (date_str, delta) pairs.
+                    list[tuple[str, str, float]]: Sorted (date_str, created_at_str, delta) triples.
                 """
-                events = []  # accumulate (date_str, delta) pairs
+                events = []  # accumulate (date_str, created_at_str, delta) triples
                 for row in ledger:  # iterate every ledger row
                     if row["source_type"] in ("LEAVE_APPLICATION", "MONETIZATION"):
                         continue  # skip leave-app debits; handled in the app walk below
                     date  = str(row["transaction_date"])  # effective date as string
                     amt   = float(row["amount"])  # cast Decimal to float
                     delta = amt if row["transaction_type"] == "CREDIT" else -amt  # + for credit, - for debit
-                    events.append((date, delta))
-                events.sort(key=lambda x: x[0])  # sort by date ascending
+                    # Resolve created_at by source_type to avoid cross-table ID collisions
+                    if row["source_type"] == "UNDERTIME_TARDINESS":
+                        ts = ut_ts.get(row["source_id"], "")   # UT deduction created_at
+                    elif row["source_type"] == "MANUAL_DEDUCTION":
+                        ts = man_ts.get(row["source_id"], "")  # manual adjustment created_at
+                    else:
+                        ts = ""  # system events sort before any same-date user record
+                    events.append((date, ts, delta))
+                events.sort(key=lambda x: (x[0], x[1]))  # sort by (date, created_at) ascending
                 return events
 
-            vl_non_app = build_non_app_events(vl_ledger)  # forwarded credits + manual VL adjustments
-            sl_non_app = build_non_app_events(sl_ledger)  # forwarded credits + manual SL adjustments
+            vl_non_app = build_non_app_events(vl_ledger, ut_ts_map, manual_ts_map)  # forwarded credits + manual VL adjustments + UT
+            sl_non_app = build_non_app_events(sl_ledger, ut_ts_map, manual_ts_map)  # forwarded credits + manual SL adjustments
             vl_running = vl_opening  # start from year-opening balance (before any this-year transaction)
             sl_running = sl_opening  # same for SL
             vl_evt_idx = 0           # pointer into vl_non_app
             sl_evt_idx = 0           # pointer into sl_non_app
 
-            for app in enriched:  # enriched is sorted by date_filed ASC — apply debits in filing order
-                app_date = str(app["date_filed"])  # filing date used as position key
+            for app in enriched:  # enriched is sorted by date_filed ASC, id ASC
+                app_date = str(app["date_filed"])           # filing date (YYYY-MM-DD)
+                app_ts   = str(app.get("created_at") or "") # when the app record was created (YYYY-MM-DD HH:MM:SS)
 
-                # Apply VL non-app events (forwarded, manual) dated on or before this app's date_filed
-                while vl_evt_idx < len(vl_non_app) and vl_non_app[vl_evt_idx][0] <= app_date:
-                    vl_running = round(vl_running + vl_non_app[vl_evt_idx][1], 4)  # apply delta
+                # Apply VL non-app events whose (date, created_at) <= (app_date, app_ts)
+                # — same-date events created before or at the same time as the app apply first.
+                while vl_evt_idx < len(vl_non_app) and (vl_non_app[vl_evt_idx][0], vl_non_app[vl_evt_idx][1]) <= (app_date, app_ts):
+                    vl_running = round(vl_running + vl_non_app[vl_evt_idx][2], 4)  # apply delta (index 2 in triple)
                     vl_evt_idx += 1  # advance pointer
 
                 # Same for SL
-                while sl_evt_idx < len(sl_non_app) and sl_non_app[sl_evt_idx][0] <= app_date:
-                    sl_running = round(sl_running + sl_non_app[sl_evt_idx][1], 4)  # apply delta
+                while sl_evt_idx < len(sl_non_app) and (sl_non_app[sl_evt_idx][0], sl_non_app[sl_evt_idx][1]) <= (app_date, app_ts):
+                    sl_running = round(sl_running + sl_non_app[sl_evt_idx][2], 4)  # apply delta (index 2 in triple)
                     sl_evt_idx += 1  # advance pointer
                 code     = app["leave_type_code"]  # leave type code (VL, SL, MNT, SPL, etc.)
                 bal_type = app["balance_type"]  # SELF, CHARGED_TO_VL, NONE, etc.
@@ -1627,6 +1659,7 @@ class LeaveApplication(BaseModel):
                     "total_points":       float(ut["total_points"]),  # total points
                     "vl_deducted":        float(ut["vl_deducted"]),  # VL days actually deducted
                     "deduction_date":     str(ut["deduction_date"]),  # effective date
+                    "created_at":         str(ut["created_at"]),  # record creation timestamp — used by frontend as secondary sort key
                     "remarks":            ut.get("remarks"),  # optional notes
                     "balance_after":      vl_bal,  # computed VL balance after this deduction
                     "vl_balance_after":   vl_bal,  # same value — alias for frontend consistency
@@ -1634,15 +1667,8 @@ class LeaveApplication(BaseModel):
                 })
 
             # --- Manual balance adjustments (DEBIT/CREDIT) for this year ---
-            manual_adj_rows = fetch_query(  # fetch all non-deleted manual adjustments for this employee and year
-                """SELECT id, deduction_number, leave_type_id, transaction_type,
-                          amount, deduction_date, remarks
-                   FROM manual_balance_deductions
-                   WHERE employee_id = %s AND YEAR(deduction_date) = %s AND is_deleted = 0
-                   ORDER BY deduction_date ASC, id ASC""",
-                [employee_id, year]
-            ) or []
-
+            # (manual_adj_rows was fetched earlier so its created_at timestamps could be used
+            # as tiebreakers in build_non_app_events above)
             manual_adjustments = []  # output list — one entry per manual adjustment record
             for adj in manual_adj_rows:  # iterate over each manual adjustment
                 adj_id = adj["id"]  # primary key — used to look up computed balance
@@ -1669,6 +1695,7 @@ class LeaveApplication(BaseModel):
                     "transaction_type":  t_type,  # DEBIT or CREDIT
                     "amount":            float(adj["amount"]),  # days adjusted
                     "deduction_date":    str(adj["deduction_date"]),  # effective date
+                    "created_at":        str(adj["created_at"]),  # creation timestamp — secondary sort key for frontend display
                     "remarks":           adj.get("remarks"),  # optional notes
                     "balance_after":     balance_after,  # computed balance of the adjusted leave type after this entry
                     "vl_balance_after":  vl_bal,  # computed VL balance at this point in time
