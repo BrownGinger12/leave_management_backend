@@ -82,6 +82,7 @@ scheduler.add_job(  # register the Jan 1 year-end balance reset job (WL→5, SPL
 
 scheduler.start()  # start the scheduler in the background
 ServiceCreditApplication.expire_cto_credits()  # run once immediately on startup to catch any expirations missed while the server was down
+AnnualLeaveCredit.catch_up_monthly_vl_sl_credits()  # backfill any monthly VL/SL credits missed while the server was down (idempotent — safe to run every startup)
 
 
 # --------------------------
