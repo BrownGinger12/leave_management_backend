@@ -42,7 +42,7 @@ class Employee(BaseModel):
     last_name: str  # employee's last name
     middle_name: Optional[str] = None  # middle name, optional
     sex: Optional[str] = None  # biological sex: MALE or FEMALE
-    email: str  # employee's email address
+    email: Optional[str] = None  # employee's email address (optional)
     employee_type: str  # TEACHING or NON_TEACHING
     employment_status: str  # e.g. PERMANENT, TEMPORARY, CASUAL
     school_id: int  # foreign key to the school/office
@@ -113,7 +113,7 @@ class Employee(BaseModel):
             dict: statusCode 201 with the created employee data, or an error dict.
         """
         try:
-            required_fields = ["first_name", "last_name", "email",
+            required_fields = ["first_name", "last_name",
                                 "employee_type", "employment_status", "school_id"]  # fields that must be present
 
             for field in required_fields:  # loop through required fields
