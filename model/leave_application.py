@@ -1589,21 +1589,11 @@ class LeaveApplication(BaseModel):
             vl_non_app = build_non_app_events(vl_ledger, ut_ts_map, manual_ts_map)  # forwarded credits + manual VL adjustments + UT
             sl_non_app = build_non_app_events(sl_ledger, ut_ts_map, manual_ts_map)  # forwarded credits + manual SL adjustments
 
-            # Walk the sorted non-app event lists once to build per-item balance maps keyed by
-            # (source_type, source_id). These are used below for UT and manual adj balance_after
-            # values so they reflect the same (date, created_at) order as the pointer walk —
-            # NOT the ledger-ID order that compute_snaps uses, which can differ on same-date events.
-            vl_non_app_bal = {}   # (source_type, source_id) -> VL balance after that event
-            _r = vl_opening       # running accumulator (separate from the pointer-walk running below)
-            for _d, _ts, _delta, _stype, _sid in vl_non_app:  # already in (date, created_at) order
-                _r = round(_r + _delta, 4)
-                vl_non_app_bal[(_stype, _sid)] = _r  # record balance after this event
-
-            sl_non_app_bal = {}   # (source_type, source_id) -> SL balance after that event
-            _r = sl_opening
-            for _d, _ts, _delta, _stype, _sid in sl_non_app:
-                _r = round(_r + _delta, 4)
-                sl_non_app_bal[(_stype, _sid)] = _r
+            # Per-event balance arrays populated inside the pointer walk below so each
+            # non-app event's balance_after accounts for all app debits that came before
+            # it in (date, created_at) order. Built into lookup maps after the walk.
+            vl_non_app_event_bal = [None] * len(vl_non_app)  # indexed by position in vl_non_app
+            sl_non_app_event_bal = [None] * len(sl_non_app)  # indexed by position in sl_non_app
 
             vl_running = vl_opening  # start from year-opening balance (before any this-year transaction)
             sl_running = sl_opening  # same for SL
@@ -1617,12 +1607,14 @@ class LeaveApplication(BaseModel):
                 # Apply VL non-app events whose (date, created_at) <= (app_date, app_ts)
                 # — same-date events created before or at the same time as the app apply first.
                 while vl_evt_idx < len(vl_non_app) and (vl_non_app[vl_evt_idx][0], vl_non_app[vl_evt_idx][1]) <= (app_date, app_ts):
-                    vl_running = round(vl_running + vl_non_app[vl_evt_idx][2], 4)  # apply delta (index 2 in triple)
+                    vl_running = round(vl_running + vl_non_app[vl_evt_idx][2], 4)  # apply delta (index 2 in tuple)
+                    vl_non_app_event_bal[vl_evt_idx] = vl_running  # snapshot includes all prior app debits
                     vl_evt_idx += 1  # advance pointer
 
                 # Same for SL
                 while sl_evt_idx < len(sl_non_app) and (sl_non_app[sl_evt_idx][0], sl_non_app[sl_evt_idx][1]) <= (app_date, app_ts):
-                    sl_running = round(sl_running + sl_non_app[sl_evt_idx][2], 4)  # apply delta (index 2 in triple)
+                    sl_running = round(sl_running + sl_non_app[sl_evt_idx][2], 4)  # apply delta (index 2 in tuple)
+                    sl_non_app_event_bal[sl_evt_idx] = sl_running  # snapshot includes all prior app debits
                     sl_evt_idx += 1  # advance pointer
                 code     = app["leave_type_code"]  # leave type code (VL, SL, MNT, SPL, etc.)
                 bal_type = app["balance_type"]  # SELF, CHARGED_TO_VL, NONE, etc.
@@ -1664,6 +1656,31 @@ class LeaveApplication(BaseModel):
                     app["vl_balance_after"] = vl_running  # VL unchanged
                     app["sl_balance_after"] = sl_running  # SL unchanged
                     # balance_after already set to None in the first pass above
+
+            # Flush non-app events that come after all apps in (date, created_at) order.
+            # The loop above only flushes events triggered by an app; events past the last
+            # app (or any employee with no apps at all) are handled here.
+            while vl_evt_idx < len(vl_non_app):
+                vl_running = round(vl_running + vl_non_app[vl_evt_idx][2], 4)  # apply remaining VL non-app event
+                vl_non_app_event_bal[vl_evt_idx] = vl_running  # snapshot — includes all app debits from the walk
+                vl_evt_idx += 1
+
+            while sl_evt_idx < len(sl_non_app):
+                sl_running = round(sl_running + sl_non_app[sl_evt_idx][2], 4)  # apply remaining SL non-app event
+                sl_non_app_event_bal[sl_evt_idx] = sl_running
+                sl_evt_idx += 1
+
+            # Build (source_type, source_id) -> balance_after lookup maps from the per-event arrays.
+            # These replace compute_snaps-derived maps for UT and manual adj response items.
+            vl_non_app_bal = {}
+            for _i, (_d, _ts, _delta, _stype, _sid) in enumerate(vl_non_app):
+                if vl_non_app_event_bal[_i] is not None:
+                    vl_non_app_bal[(_stype, _sid)] = vl_non_app_event_bal[_i]
+
+            sl_non_app_bal = {}
+            for _i, (_d, _ts, _delta, _stype, _sid) in enumerate(sl_non_app):
+                if sl_non_app_event_bal[_i] is not None:
+                    sl_non_app_bal[(_stype, _sid)] = sl_non_app_event_bal[_i]
 
             # --- UT deductions with computed balance_after ---
             ut_deductions = []  # build list iteratively to support per-row balance fallback
