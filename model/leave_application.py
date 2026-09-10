@@ -1547,7 +1547,8 @@ class LeaveApplication(BaseModel):
             def build_non_app_events(ledger, ut_ts, man_ts):
                 """
                 Extract all balance-changing events except leave-app debits from the ledger as
-                (date_str, created_at_str, delta) triples sorted by (date, created_at).
+                (date_str, created_at_str, delta, source_type, source_id) tuples sorted by
+                (date, created_at).
 
                 Using created_at as a secondary sort key means: if a manual credit was posted
                 before an app was filed on the same date it applies first; if posted after the
@@ -1563,28 +1564,47 @@ class LeaveApplication(BaseModel):
                     man_ts (dict): {manual_balance_deductions.id -> created_at str}.
 
                 Returns:
-                    list[tuple[str, str, float]]: Sorted (date_str, created_at_str, delta) triples.
+                    list[tuple]: Sorted (date_str, created_at_str, delta, source_type, source_id) tuples.
                 """
-                events = []  # accumulate (date_str, created_at_str, delta) triples
+                events = []  # accumulate (date_str, created_at_str, delta, source_type, source_id) tuples
                 for row in ledger:  # iterate every ledger row
                     if row["source_type"] in ("LEAVE_APPLICATION", "MONETIZATION"):
                         continue  # skip leave-app debits; handled in the app walk below
-                    date  = str(row["transaction_date"])  # effective date as string
-                    amt   = float(row["amount"])  # cast Decimal to float
-                    delta = amt if row["transaction_type"] == "CREDIT" else -amt  # + for credit, - for debit
+                    date     = str(row["transaction_date"])  # effective date as string
+                    amt      = float(row["amount"])  # cast Decimal to float
+                    delta    = amt if row["transaction_type"] == "CREDIT" else -amt  # + for credit, - for debit
+                    src_type = row["source_type"]   # e.g. UNDERTIME_TARDINESS, MANUAL_DEDUCTION, FORWARDED_BALANCE
+                    src_id   = row["source_id"]     # FK into the source table
                     # Resolve created_at by source_type to avoid cross-table ID collisions
-                    if row["source_type"] == "UNDERTIME_TARDINESS":
-                        ts = ut_ts.get(row["source_id"], "")   # UT deduction created_at
-                    elif row["source_type"] == "MANUAL_DEDUCTION":
-                        ts = man_ts.get(row["source_id"], "")  # manual adjustment created_at
+                    if src_type == "UNDERTIME_TARDINESS":
+                        ts = ut_ts.get(src_id, "")   # UT deduction created_at
+                    elif src_type == "MANUAL_DEDUCTION":
+                        ts = man_ts.get(src_id, "")  # manual adjustment created_at
                     else:
                         ts = ""  # system events sort before any same-date user record
-                    events.append((date, ts, delta))
+                    events.append((date, ts, delta, src_type, src_id))
                 events.sort(key=lambda x: (x[0], x[1]))  # sort by (date, created_at) ascending
                 return events
 
             vl_non_app = build_non_app_events(vl_ledger, ut_ts_map, manual_ts_map)  # forwarded credits + manual VL adjustments + UT
             sl_non_app = build_non_app_events(sl_ledger, ut_ts_map, manual_ts_map)  # forwarded credits + manual SL adjustments
+
+            # Walk the sorted non-app event lists once to build per-item balance maps keyed by
+            # (source_type, source_id). These are used below for UT and manual adj balance_after
+            # values so they reflect the same (date, created_at) order as the pointer walk —
+            # NOT the ledger-ID order that compute_snaps uses, which can differ on same-date events.
+            vl_non_app_bal = {}   # (source_type, source_id) -> VL balance after that event
+            _r = vl_opening       # running accumulator (separate from the pointer-walk running below)
+            for _d, _ts, _delta, _stype, _sid in vl_non_app:  # already in (date, created_at) order
+                _r = round(_r + _delta, 4)
+                vl_non_app_bal[(_stype, _sid)] = _r  # record balance after this event
+
+            sl_non_app_bal = {}   # (source_type, source_id) -> SL balance after that event
+            _r = sl_opening
+            for _d, _ts, _delta, _stype, _sid in sl_non_app:
+                _r = round(_r + _delta, 4)
+                sl_non_app_bal[(_stype, _sid)] = _r
+
             vl_running = vl_opening  # start from year-opening balance (before any this-year transaction)
             sl_running = sl_opening  # same for SL
             vl_evt_idx = 0           # pointer into vl_non_app
@@ -1648,9 +1668,10 @@ class LeaveApplication(BaseModel):
             # --- UT deductions with computed balance_after ---
             ut_deductions = []  # build list iteratively to support per-row balance fallback
             for ut in ut_rows:  # iterate each undertime/tardiness entry
-                vl_bal = vl_ut_debit.get(ut["id"])  # look up the running VL balance at this deduction
-                if vl_bal is None:  # fallback: key mismatch or UT debit not in vl_ledger
-                    vl_bal = bal_at_date(vl_snaps, str(ut["deduction_date"]), vl_opening)  # use date-based snapshot
+                # Use created_at-ordered balance map so same-date UT and manual events sort correctly.
+                vl_bal = vl_non_app_bal.get(("UNDERTIME_TARDINESS", ut["id"]))  # balance in (date, created_at) order
+                if vl_bal is None:  # fallback: not in map (e.g. no ledger entry yet)
+                    vl_bal = vl_ut_debit.get(ut["id"]) or bal_at_date(vl_snaps, str(ut["deduction_date"]), vl_opening)
                 ut_deductions.append({
                     "id":                 ut["id"],  # deduction primary key
                     "application_number": ut["application_number"],  # UTD-XXXXXXXX reference
@@ -1676,11 +1697,13 @@ class LeaveApplication(BaseModel):
                 t_type = adj["transaction_type"]  # DEBIT or CREDIT
 
                 if lt_id == vl_leave_type_id:  # VL adjustment
-                    balance_after = vl_manual_adj.get(adj_id)  # computed VL balance after this entry
+                    # Use created_at-ordered map so same-date debits sort correctly vs UT and other events
+                    balance_after = vl_non_app_bal.get(("MANUAL_DEDUCTION", adj_id)) or vl_manual_adj.get(adj_id)
                     vl_bal = balance_after  # VL balance after this adjustment
                     sl_bal = bal_at_date(sl_snaps, str(adj["deduction_date"]), sl_opening)  # SL at same point
                 elif lt_id == sl_leave_type_id:  # SL adjustment
-                    balance_after = sl_manual_adj.get(adj_id)  # computed SL balance after this entry
+                    # Same fix for SL manual adjustments
+                    balance_after = sl_non_app_bal.get(("MANUAL_DEDUCTION", adj_id)) or sl_manual_adj.get(adj_id)
                     vl_bal = bal_at_date(vl_snaps, str(adj["deduction_date"]), vl_opening)  # VL at same point
                     sl_bal = balance_after  # SL balance after this adjustment
                 else:  # unknown leave type — include without balance context
