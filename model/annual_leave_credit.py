@@ -317,24 +317,29 @@ class AnnualLeaveCredit:
     @staticmethod
     def catch_up_monthly_vl_sl_credits() -> None:
         """
-        Called once on server startup to backfill any monthly VL/SL credits
-        that were missed while the server was down (e.g. server was offline on
-        the 1st of the month when the cron was scheduled to fire).
+        Called once on server startup to credit the previous calendar month if
+        the cron job that was supposed to run at month-end was missed while the
+        server was down.
 
-        Iterates every month from January up to and including the current month
-        of the current year, and calls post_monthly_vl_sl_credits for each.
-        Because that function is fully idempotent per employee, months that
-        already ran are silently skipped — no double-posting occurs.
+        Only the immediately preceding month is checked. The current month is
+        not touched — it will be credited by the normal scheduler at month-end.
+        Fully idempotent: if the previous month was already credited, the call
+        is silently skipped. Errors are swallowed so a failure never prevents
+        the server from starting.
+
+        Parameters:
+            None
 
         Returns:
-            None — errors are swallowed so a catch-up failure never prevents
-            the server from starting.
+            None
         """
         try:
-            today = date.today()  # reference date for catch-up window
-            year  = today.year   # current calendar year
-            for month in range(1, today.month + 1):  # Jan through current month (inclusive)
-                AnnualLeaveCredit.post_monthly_vl_sl_credits(year=year, month=month)  # idempotent — safe to call even if already run
+            today = date.today()  # reference date
+            if today.month == 1:  # January — no previous month in this year to catch up
+                return
+            year  = today.year       # current calendar year
+            month = today.month - 1  # the month that may have been missed
+            AnnualLeaveCredit.post_monthly_vl_sl_credits(year=year, month=month)  # idempotent — skips if already run
         except Exception:
             pass  # never crash the server on a catch-up failure
 
