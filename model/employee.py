@@ -148,7 +148,7 @@ class Employee(BaseModel):
                     data["last_name"],                        # last name
                     data.get("middle_name"),                  # middle name, may be None
                     sex,                                      # MALE or FEMALE, may be None
-                    data["email"],                            # email address
+                    data.get("email"),                        # email address, may be None
                     data["employee_type"],                    # TEACHING or NON_TEACHING
                     data["employment_status"],                # employment status
                     data["school_id"],                        # school/office ID
