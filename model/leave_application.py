@@ -1592,8 +1592,10 @@ class LeaveApplication(BaseModel):
             # Per-event balance arrays populated inside the pointer walk below so each
             # non-app event's balance_after accounts for all app debits that came before
             # it in (date, created_at) order. Built into lookup maps after the walk.
-            vl_non_app_event_bal = [None] * len(vl_non_app)  # indexed by position in vl_non_app
-            sl_non_app_event_bal = [None] * len(sl_non_app)  # indexed by position in sl_non_app
+            vl_non_app_event_bal = [None] * len(vl_non_app)  # VL balance after each VL non-app event
+            sl_non_app_event_bal = [None] * len(sl_non_app)  # SL balance after each SL non-app event
+            vl_non_app_sl_cross  = [None] * len(vl_non_app)  # SL balance at the moment each VL non-app event fires
+            sl_non_app_vl_cross  = [None] * len(sl_non_app)  # VL balance at the moment each SL non-app event fires
 
             vl_running = vl_opening  # start from year-opening balance (before any this-year transaction)
             sl_running = sl_opening  # same for SL
@@ -1608,13 +1610,15 @@ class LeaveApplication(BaseModel):
                 # — same-date events created before or at the same time as the app apply first.
                 while vl_evt_idx < len(vl_non_app) and (vl_non_app[vl_evt_idx][0], vl_non_app[vl_evt_idx][1]) <= (app_date, app_ts):
                     vl_running = round(vl_running + vl_non_app[vl_evt_idx][2], 4)  # apply delta (index 2 in tuple)
-                    vl_non_app_event_bal[vl_evt_idx] = vl_running  # snapshot includes all prior app debits
+                    vl_non_app_event_bal[vl_evt_idx] = vl_running  # VL balance — includes all prior app debits
+                    vl_non_app_sl_cross[vl_evt_idx]  = sl_running  # SL balance at this exact moment (before SL flush for this app)
                     vl_evt_idx += 1  # advance pointer
 
                 # Same for SL
                 while sl_evt_idx < len(sl_non_app) and (sl_non_app[sl_evt_idx][0], sl_non_app[sl_evt_idx][1]) <= (app_date, app_ts):
                     sl_running = round(sl_running + sl_non_app[sl_evt_idx][2], 4)  # apply delta (index 2 in tuple)
-                    sl_non_app_event_bal[sl_evt_idx] = sl_running  # snapshot includes all prior app debits
+                    sl_non_app_event_bal[sl_evt_idx] = sl_running  # SL balance — includes all prior app debits
+                    sl_non_app_vl_cross[sl_evt_idx]  = vl_running  # VL balance at this exact moment
                     sl_evt_idx += 1  # advance pointer
                 code     = app["leave_type_code"]  # leave type code (VL, SL, MNT, SPL, etc.)
                 bal_type = app["balance_type"]  # SELF, CHARGED_TO_VL, NONE, etc.
@@ -1662,25 +1666,32 @@ class LeaveApplication(BaseModel):
             # app (or any employee with no apps at all) are handled here.
             while vl_evt_idx < len(vl_non_app):
                 vl_running = round(vl_running + vl_non_app[vl_evt_idx][2], 4)  # apply remaining VL non-app event
-                vl_non_app_event_bal[vl_evt_idx] = vl_running  # snapshot — includes all app debits from the walk
+                vl_non_app_event_bal[vl_evt_idx] = vl_running   # VL balance after this event
+                vl_non_app_sl_cross[vl_evt_idx]  = sl_running   # SL balance at this moment (after all SL app debits)
                 vl_evt_idx += 1
 
             while sl_evt_idx < len(sl_non_app):
                 sl_running = round(sl_running + sl_non_app[sl_evt_idx][2], 4)  # apply remaining SL non-app event
-                sl_non_app_event_bal[sl_evt_idx] = sl_running
+                sl_non_app_event_bal[sl_evt_idx] = sl_running   # SL balance after this event
+                sl_non_app_vl_cross[sl_evt_idx]  = vl_running   # VL balance at this moment
                 sl_evt_idx += 1
 
-            # Build (source_type, source_id) -> balance_after lookup maps from the per-event arrays.
-            # These replace compute_snaps-derived maps for UT and manual adj response items.
-            vl_non_app_bal = {}
+            # Build same-type balance maps and cross-type balance maps from the per-event arrays.
+            # Same-type: (source_type, source_id) -> own balance_after
+            # Cross-type: (source_type, source_id) -> other-type balance at time of flush
+            vl_non_app_bal    = {}  # VL balance after each VL non-app event
+            vl_non_app_sl_bal = {}  # SL balance at the time of each VL non-app event
             for _i, (_d, _ts, _delta, _stype, _sid) in enumerate(vl_non_app):
                 if vl_non_app_event_bal[_i] is not None:
-                    vl_non_app_bal[(_stype, _sid)] = vl_non_app_event_bal[_i]
+                    vl_non_app_bal[(_stype, _sid)]    = vl_non_app_event_bal[_i]
+                    vl_non_app_sl_bal[(_stype, _sid)] = vl_non_app_sl_cross[_i]
 
-            sl_non_app_bal = {}
+            sl_non_app_bal    = {}  # SL balance after each SL non-app event
+            sl_non_app_vl_bal = {}  # VL balance at the time of each SL non-app event
             for _i, (_d, _ts, _delta, _stype, _sid) in enumerate(sl_non_app):
                 if sl_non_app_event_bal[_i] is not None:
-                    sl_non_app_bal[(_stype, _sid)] = sl_non_app_event_bal[_i]
+                    sl_non_app_bal[(_stype, _sid)]    = sl_non_app_event_bal[_i]
+                    sl_non_app_vl_bal[(_stype, _sid)] = sl_non_app_vl_cross[_i]
 
             # --- UT deductions with computed balance_after ---
             ut_deductions = []  # build list iteratively to support per-row balance fallback
@@ -1701,7 +1712,8 @@ class LeaveApplication(BaseModel):
                     "remarks":            ut.get("remarks"),  # optional notes
                     "balance_after":      vl_bal,  # computed VL balance after this deduction
                     "vl_balance_after":   vl_bal,  # same value — alias for frontend consistency
-                    "sl_balance_after":   bal_at_date(sl_snaps, str(ut["deduction_date"]), sl_opening),  # SL at deduction date
+                    "sl_balance_after":   vl_non_app_sl_bal.get(("UNDERTIME_TARDINESS", ut["id"]),
+                                              bal_at_date(sl_snaps, str(ut["deduction_date"]), sl_opening)),  # SL balance at UT creation time
                 })
 
             # --- Manual balance adjustments (DEBIT/CREDIT) for this year ---
@@ -1714,15 +1726,17 @@ class LeaveApplication(BaseModel):
                 t_type = adj["transaction_type"]  # DEBIT or CREDIT
 
                 if lt_id == vl_leave_type_id:  # VL adjustment
-                    # Use created_at-ordered map so same-date debits sort correctly vs UT and other events
                     balance_after = vl_non_app_bal.get(("MANUAL_DEDUCTION", adj_id)) or vl_manual_adj.get(adj_id)
                     vl_bal = balance_after  # VL balance after this adjustment
-                    sl_bal = bal_at_date(sl_snaps, str(adj["deduction_date"]), sl_opening)  # SL at same point
+                    # SL balance at the moment this VL event fired (accounts for SL app debits created before it)
+                    sl_bal = vl_non_app_sl_bal.get(("MANUAL_DEDUCTION", adj_id),
+                                 bal_at_date(sl_snaps, str(adj["deduction_date"]), sl_opening))
                 elif lt_id == sl_leave_type_id:  # SL adjustment
-                    # Same fix for SL manual adjustments
                     balance_after = sl_non_app_bal.get(("MANUAL_DEDUCTION", adj_id)) or sl_manual_adj.get(adj_id)
-                    vl_bal = bal_at_date(vl_snaps, str(adj["deduction_date"]), vl_opening)  # VL at same point
                     sl_bal = balance_after  # SL balance after this adjustment
+                    # VL balance at the moment this SL event fired
+                    vl_bal = sl_non_app_vl_bal.get(("MANUAL_DEDUCTION", adj_id),
+                                 bal_at_date(vl_snaps, str(adj["deduction_date"]), vl_opening))
                 else:  # unknown leave type — include without balance context
                     balance_after = None
                     vl_bal = None
