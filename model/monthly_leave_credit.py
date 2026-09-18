@@ -268,9 +268,9 @@ class MonthlyLeaveCredit(BaseModel):
                 for row in ledger:  # iterate chronologically
                     amt = float(row["amount"])  # transaction amount
                     if row["transaction_type"] == "CREDIT":  # credit adds to balance
-                        running = round(running + amt, 4)
+                        running = running + amt
                     else:  # DEBIT subtracts from balance
-                        running = round(running - amt, 4)
+                        running = running - amt
                     bal_map[row["id"]] = running  # record balance after this row
                 return bal_map
 
@@ -282,7 +282,7 @@ class MonthlyLeaveCredit(BaseModel):
             for r in rows:  # override balance_snapshot_after with the recomputed value
                 computed = bal_maps.get(r["leave_type_id"], {}).get(r["transaction_id"])  # look up computed balance
                 row_dict = dict(r)  # copy row to avoid mutating the original
-                row_dict["balance_snapshot_after"] = round(computed, 4) if computed is not None else float(r["balance_snapshot_after"])
+                row_dict["balance_snapshot_after"] = computed if computed is not None else float(r["balance_snapshot_after"])
                 result_rows.append(row_dict)  # add to result list
 
             return {  # return results

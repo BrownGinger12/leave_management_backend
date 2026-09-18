@@ -227,7 +227,7 @@ class CtoApplication(BaseModel):
                 )
 
                 current_balance = float(balance_row[0]["balance"]) if balance_row else 0.0  # cast Decimal to float, default 0
-                new_balance = round(current_balance + days_rendered, 2)  # compute balance after credit
+                new_balance = current_balance + days_rendered  # compute balance after credit
                 transaction_number = CtoApplication._generate_transaction_number()  # generate unique transaction number
 
                 ledger_result = query_insert(  # insert the CREDIT record into the ledger

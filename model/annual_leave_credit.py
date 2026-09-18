@@ -418,7 +418,7 @@ class AnnualLeaveCredit:
                     code (str): Leave type code string for the audit remark.
                     extra_remark (str): Optional suffix appended to the remark.
                 """
-                diff = round(target - current, 4)  # net adjustment needed
+                diff = target - current  # net adjustment needed
                 if diff == 0:  # already at target — nothing to post
                     return True
                 txn_type = "CREDIT" if diff > 0 else "DEBIT"  # credit to add, debit to remove

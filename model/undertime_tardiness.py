@@ -114,7 +114,7 @@ class UndertimeTardiness:
                 return {"statusCode": 500, "message": "VL leave type not found in the system"}
             vl_type_id = vl_type[0]["id"]  # VL leave type primary key
 
-            total_points = round(undertime_points + tardiness_points, 4)  # total days to deduct
+            total_points = undertime_points + tardiness_points  # total days to deduct
             remarks = data.get("remarks", "").strip() if data.get("remarks") else None  # optional notes
             application_number = UndertimeTardiness._generate_application_number()  # unique UTD number
 

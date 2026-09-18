@@ -195,9 +195,9 @@ class EmployeeTypeConversion(BaseModel):
                 if vsc_balance < 0:  # negative balance would produce invalid credits
                     return {"statusCode": 400, "message": "VSC balance is negative; cannot convert"}  # reject
 
-                total_credits = round((30 * vsc_balance) / 69, 4)  # apply DepEd conversion formula
-                vl_credits = round(total_credits / 2, 4)  # split equally to VL
-                sl_credits = round(total_credits / 2, 4)  # split equally to SL
+                total_credits = (30 * vsc_balance) / 69  # apply DepEd conversion formula
+                vl_credits = total_credits / 2  # split equally to VL
+                sl_credits = total_credits / 2  # split equally to SL
 
                 # --- Insert the conversion audit record first so ledger rows can reference it ---
                 conv_result = query_insert(  # insert conversion record
@@ -292,7 +292,7 @@ class EmployeeTypeConversion(BaseModel):
                 if vl_balance < 0 or sl_balance < 0:  # negative balances would produce invalid VSC
                     return {"statusCode": 400, "message": "VL or SL balance is negative; cannot convert"}  # reject
 
-                vsc_credits = round(((vl_balance + sl_balance) / 30) * 69, 4)  # apply DepEd conversion formula
+                vsc_credits = ((vl_balance + sl_balance) / 30) * 69  # apply DepEd conversion formula
 
                 # --- Insert the conversion audit record first ---
                 conv_result = query_insert(  # insert conversion record

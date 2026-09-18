@@ -901,18 +901,18 @@ class ServiceCreditApplication(BaseModel):
                     amount_from_credit = deduction_lookup.get(key, 0.0)  # days deducted from THIS credit specifically
                     if app["status"] in REVERSED_STATUSES:  # reversed: balance was already restored, no net deduction
                         app["deduction"] = 0.0  # zero deduction shown on the leave card
-                        app["balance_after"] = round(running_balance, 4)  # balance unchanged at this row
+                        app["balance_after"] = running_balance  # balance unchanged at this row
                     else:  # active application: apply deduction from this credit
                         running_balance -= amount_from_credit  # reduce the running balance
-                        app["deduction"] = -round(amount_from_credit, 4)  # negative = days consumed from this credit
-                        app["balance_after"] = round(running_balance, 4)  # snapshot after deduction
+                        app["deduction"] = -amount_from_credit  # negative = days consumed from this credit
+                        app["balance_after"] = running_balance  # snapshot after deduction
 
                 credit_row["leave_applications"] = apps_for_credit  # attach sorted apps with running balance fields
 
                 # detect forfeited days: difference between running balance after all apps and actual remaining_balance
                 # this gap is caused by the expiry job zeroing out the credit — it is NOT accounted for by any leave app
-                remaining = round(float(credit["remaining_balance"]), 4)  # actual remaining balance from DB
-                forfeited = round(running_balance - remaining, 4)  # days lost to expiry (0 if nothing forfeited)
+                remaining = float(credit["remaining_balance"])  # actual remaining balance from DB
+                forfeited = running_balance - remaining  # days lost to expiry (0 if nothing forfeited)
                 valid_until = credit["valid_until"]  # expiry date for this credit
                 is_expired = bool(valid_until and valid_until < date.today())  # true if past the expiry date
 
@@ -1186,7 +1186,7 @@ class ServiceCreditApplication(BaseModel):
                 leave_applications.append({  # add a synthetic credit line item as the opening entry
                     "entry_type":          "FORWARDED_BALANCE",  # marks this as a forwarded balance, not a leave app
                     "amount_from_credit":  float(credit["original_balance"]),  # days credited (positive)
-                    "balance_after":       round(running_balance, 3),  # running balance after this credit
+                    "balance_after":       running_balance,  # running balance after this credit
                     "remarks":             credit.get("balance_remarks"),  # remarks from the balance table
                 })
 
@@ -1205,7 +1205,7 @@ class ServiceCreditApplication(BaseModel):
                     "entry_type":              "LEAVE_APPLICATION",  # marks this as a regular leave application
                     **app,  # all leave application fields
                     "amount_from_credit":      amount_from_credit,  # days charged to this specific credit
-                    "balance_after":           round(running_balance, 3),  # running balance after this deduction
+                    "balance_after":           running_balance,  # running balance after this deduction
                     "leave_dates_with_pay":    date_info.get("with_pay", []),  # list of paid leave dates
                     "leave_dates_without_pay": date_info.get("without_pay", []),  # list of LWOP leave dates
                     "total_dates_incurred":    date_info.get("all", []),  # all leave dates combined

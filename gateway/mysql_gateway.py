@@ -144,9 +144,9 @@ def recalculate_ledger_snapshots(employee_id: int, leave_type_id: int) -> float:
     for row in rows:  # walk each transaction in chronological order
         amount = float(row["amount"])  # cast Decimal to float for arithmetic
         if row["transaction_type"] == "CREDIT":  # credit increases the balance
-            running = round(running + amount, 2)  # add credit amount to running total
+            running = running + amount  # add credit amount to running total
         else:  # DEBIT decreases the balance
-            running = round(running - amount, 2)  # subtract debit amount from running total
+            running = running - amount  # subtract debit amount from running total
 
         query(  # update this row's snapshot with the recalculated running balance
             "UPDATE leave_credit_transactions SET balance_snapshot_after = %s WHERE id = %s",

@@ -1332,8 +1332,8 @@ class LeaveApplication(BaseModel):
                 for r in (refund_rows or []):  # build app_id -> refunded_days lookup
                     refunded_per_app[r["leave_application_id"]] = float(r["total_refunded"])
             for app in enriched:  # attach computed fields to each app
-                app["refunded_days"] = round(refunded_per_app.get(app["id"], 0.0), 4)  # days refunded by holidays
-                app["effective_days"] = round(max(0.0, float(app["total_days"] or 0.0) - app["refunded_days"]), 4)  # net chargeable days
+                app["refunded_days"] = refunded_per_app.get(app["id"], 0.0)  # days refunded by holidays
+                app["effective_days"] = max(0.0, float(app["total_days"] or 0.0) - app["refunded_days"])  # net chargeable days
 
             REVERSED_STATUSES = {"RETURNED", "DISAPPROVED"}  # statuses where the balance deduction was already reversed
 
@@ -1394,9 +1394,9 @@ class LeaveApplication(BaseModel):
                 for row in reversed(ledger):  # undo each transaction newest-first
                     amt = float(row["amount"])  # transaction amount
                     if row["transaction_type"] == "CREDIT":  # credit was added — undo it
-                        bal = round(bal - amt, 4)
+                        bal = bal - amt
                     else:  # debit was subtracted — undo it
-                        bal = round(bal + amt, 4)
+                        bal = bal + amt
                 return bal  # result is the balance before any this-year transaction
 
             vl_opening = backtrack(get_current_bal(vl_leave_type_id), vl_ledger)  # VL balance entering this year
@@ -1420,9 +1420,9 @@ class LeaveApplication(BaseModel):
                 for row in ledger:  # iterate in (transaction_date ASC, id ASC) order
                     amt = float(row["amount"])  # transaction amount
                     if row["transaction_type"] == "CREDIT":  # credit increases balance
-                        running = round(running + amt, 4)
+                        running = running + amt
                     else:  # DEBIT decreases balance
-                        running = round(running - amt, 4)
+                        running = running - amt
                     tx_date = str(row["transaction_date"])  # string representation for comparison
                     lid = row["id"]  # ledger row id
                     snap_list.append((tx_date, lid, running))  # record snapshot at this point
@@ -1446,7 +1446,7 @@ class LeaveApplication(BaseModel):
                         result = snap  # update result; a later entry may still qualify
                     else:
                         break  # past target date — stop
-                return round(result, 4)
+                return result
 
             def bal_before_lid(snaps, target_lid, opening):
                 """Return the computed balance before the ledger entry with id=target_lid (exclusive)."""
@@ -1456,7 +1456,7 @@ class LeaveApplication(BaseModel):
                         result = snap
                     else:
                         break  # reached or passed target; stop
-                return round(result, 4)
+                return result
 
             # --- Determine which SL apps used VSC credits (deducted from VSC, not SL) ---
             sl_app_ids = [app["id"] for app in enriched if app["leave_type_code"] == "SL"]  # collect SL app IDs
@@ -1607,13 +1607,13 @@ class LeaveApplication(BaseModel):
                 # Apply VL non-app events whose (date, created_at) <= (app_date, app_ts)
                 # — same-date events created before or at the same time as the app apply first.
                 while vl_evt_idx < len(vl_non_app) and (vl_non_app[vl_evt_idx][0], vl_non_app[vl_evt_idx][1]) <= (app_date, app_ts):
-                    vl_running = round(vl_running + vl_non_app[vl_evt_idx][2], 4)  # apply delta (index 2 in tuple)
+                    vl_running = vl_running + vl_non_app[vl_evt_idx][2]  # apply delta (index 2 in tuple)
                     vl_non_app_event_bal[vl_evt_idx] = vl_running  # VL balance — includes all prior app debits
                     vl_evt_idx += 1  # advance pointer
 
                 # Same for SL
                 while sl_evt_idx < len(sl_non_app) and (sl_non_app[sl_evt_idx][0], sl_non_app[sl_evt_idx][1]) <= (app_date, app_ts):
-                    sl_running = round(sl_running + sl_non_app[sl_evt_idx][2], 4)  # apply delta (index 2 in tuple)
+                    sl_running = sl_running + sl_non_app[sl_evt_idx][2]  # apply delta (index 2 in tuple)
                     sl_non_app_event_bal[sl_evt_idx] = sl_running  # SL balance — includes all prior app debits
                     sl_evt_idx += 1  # advance pointer
                 code     = app["leave_type_code"]  # leave type code (VL, SL, MNT, SPL, etc.)
@@ -1629,14 +1629,14 @@ class LeaveApplication(BaseModel):
 
                 if bal_type == "CHARGED_TO_VL" or (bal_type == "SELF" and code == "VL"):
                     if has_vl_debit:  # apply VL deduction only if the application was submitted
-                        vl_running = round(vl_running - eff, 4)
+                        vl_running = vl_running - eff
                     app["vl_balance_after"] = vl_running  # running VL balance after this entry
                     app["sl_balance_after"] = sl_running  # SL is unchanged for this leave type
                     app["balance_after"]    = vl_running  # primary balance column
 
                 elif bal_type == "SELF" and code == "SL" and app_id not in vsc_funded_sl:
                     if has_sl_debit:  # apply SL deduction only if the application was submitted
-                        sl_running = round(sl_running - eff, 4)
+                        sl_running = sl_running - eff
                     app["vl_balance_after"] = vl_running  # VL is unchanged for this leave type
                     app["sl_balance_after"] = sl_running  # running SL balance after this entry
                     app["balance_after"]    = sl_running  # primary balance column
@@ -1645,9 +1645,9 @@ class LeaveApplication(BaseModel):
                     mnt_vl = float(app.get("mnt_vl_days") or 0.0)  # VL days being monetized
                     mnt_sl = float(app.get("mnt_sl_days") or 0.0)  # SL days being monetized
                     if has_vl_debit:  # apply VL deduction if monetization was submitted
-                        vl_running = round(vl_running - mnt_vl, 4)
+                        vl_running = vl_running - mnt_vl
                     if has_sl_debit:  # apply SL deduction if monetization was submitted
-                        sl_running = round(sl_running - mnt_sl, 4)
+                        sl_running = sl_running - mnt_sl
                     app["vl_balance_after"] = vl_running  # running VL balance after monetization
                     app["sl_balance_after"] = sl_running  # running SL balance after monetization
                     app["balance_after"]    = None  # no single balance column for monetization
@@ -1661,12 +1661,12 @@ class LeaveApplication(BaseModel):
             # The loop above only flushes events triggered by an app; events past the last
             # app (or any employee with no apps at all) are handled here.
             while vl_evt_idx < len(vl_non_app):
-                vl_running = round(vl_running + vl_non_app[vl_evt_idx][2], 4)  # apply remaining VL non-app event
+                vl_running = vl_running + vl_non_app[vl_evt_idx][2]  # apply remaining VL non-app event
                 vl_non_app_event_bal[vl_evt_idx] = vl_running  # VL balance after this event
                 vl_evt_idx += 1
 
             while sl_evt_idx < len(sl_non_app):
-                sl_running = round(sl_running + sl_non_app[sl_evt_idx][2], 4)  # apply remaining SL non-app event
+                sl_running = sl_running + sl_non_app[sl_evt_idx][2]  # apply remaining SL non-app event
                 sl_non_app_event_bal[sl_evt_idx] = sl_running
                 sl_evt_idx += 1
 
@@ -1705,7 +1705,7 @@ class LeaveApplication(BaseModel):
                 running = opening
                 timeline = []
                 for d, ts, delta in all_evts:
-                    running = round(running + delta, 4)
+                    running = running + delta
                     timeline.append((d, ts, running))
                 return timeline
 
