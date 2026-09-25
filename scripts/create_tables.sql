@@ -65,8 +65,8 @@ CREATE TABLE IF NOT EXISTS leave_applications (
     other_leave_description VARCHAR(255) DEFAULT NULL,                          -- additional description when leave type is "Others"
     status                  ENUM('FOR HRMO ACTION', 'FOR APPROVAL', 'RETURNED', 'DISAPPROVED', 'APPROVED') NOT NULL DEFAULT 'FOR HRMO ACTION',  -- current status in the workflow
     status_updated_by       INT DEFAULT NULL,                                   -- FK to employees.id; the approver who last changed the status
-    mnt_vl_days             DECIMAL(8, 2) DEFAULT NULL,                         -- VL days deducted via monetization (MNT type only; NULL for regular leave)
-    mnt_sl_days             DECIMAL(8, 2) DEFAULT NULL,                         -- SL days deducted via monetization (MNT type only; NULL for regular leave)
+    mnt_vl_days             DECIMAL(12, 6) DEFAULT NULL,                        -- VL days deducted via monetization (MNT type only; NULL for regular leave)
+    mnt_sl_days             DECIMAL(12, 6) DEFAULT NULL,                        -- SL days deducted via monetization (MNT type only; NULL for regular leave)
     is_deleted              TINYINT(1) NOT NULL DEFAULT 0,                      -- 1 = soft-deleted; excluded from all queries
     deleted_at              DATETIME DEFAULT NULL,                              -- timestamp when the record was soft-deleted
     deleted_by              INT DEFAULT NULL,                                   -- FK to users.id; the user who performed the soft delete
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS employee_leave_balances (
     id              INT AUTO_INCREMENT PRIMARY KEY,                             -- unique row identifier
     employee_id     INT NOT NULL,                                               -- FK to employees.id
     leave_type_id   INT NOT NULL,                                               -- FK to leave_types.id
-    balance         DECIMAL(8, 2) NOT NULL DEFAULT 0.00,                        -- current cached balance in days
+    balance         DECIMAL(12, 6) NOT NULL DEFAULT 0.000000,                    -- current cached balance in days
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,                         -- record creation timestamp
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- record last update timestamp
 
@@ -172,11 +172,11 @@ CREATE TABLE IF NOT EXISTS leave_credit_transactions (
     employee_id             INT NOT NULL,                                       -- FK to employees.id
     leave_type_id           INT NOT NULL,                                       -- FK to leave_types.id
     transaction_type        ENUM('CREDIT', 'DEBIT') NOT NULL,                  -- CREDIT = balance increase, DEBIT = balance decrease
-    amount                  DECIMAL(8, 2) NOT NULL,                             -- number of days credited or debited
+    amount                  DECIMAL(12, 6) NOT NULL,                            -- number of days credited or debited
     source_type             ENUM('SPECIAL_ORDER', 'LEAVE_APPLICATION', 'MANUAL_ADJUSTMENT', 'SYSTEM_ADJUSTMENT', 'HOLIDAY_REFUND', 'MONETIZATION', 'FORWARDED_BALANCE', 'UNDERTIME_TARDINESS', 'TYPE_CONVERSION') NOT NULL,  -- origin of the transaction
     source_id               INT NOT NULL,                                       -- ID of the source record (e.g. leave_application.id)
     transaction_date        DATE NOT NULL,                                      -- date the transaction took effect
-    balance_snapshot_after  DECIMAL(8, 2) NOT NULL,                             -- employee's balance immediately after this transaction
+    balance_snapshot_after  DECIMAL(12, 6) NOT NULL,                            -- employee's balance immediately after this transaction
     remarks                 TEXT DEFAULT NULL,                                  -- optional notes for manual or system adjustments
     created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,                 -- record creation timestamp
 
@@ -271,8 +271,8 @@ CREATE TABLE IF NOT EXISTS cto_credit_balances (
     id                              INT AUTO_INCREMENT PRIMARY KEY,               -- unique row identifier
     service_credit_application_id   INT NOT NULL,                                 -- FK to the source CTO service credit application
     employee_id                     INT NOT NULL,                                 -- FK to employees.id (denormalized for fast lookup)
-    original_balance                DECIMAL(10,2) NOT NULL,                       -- credit amount at time of application submission
-    remaining_balance               DECIMAL(10,2) NOT NULL,                       -- days still available for leave deduction
+    original_balance                DECIMAL(12,6) NOT NULL,                       -- credit amount at time of application submission
+    remaining_balance               DECIMAL(12,6) NOT NULL,                       -- days still available for leave deduction
     valid_until                     DATE NOT NULL,                                -- expiry date (latest participation date + 1 year)
     created_at                      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,          -- record creation timestamp
     updated_at                      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- last update timestamp
@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS cto_deduction_log (
     id                      INT AUTO_INCREMENT PRIMARY KEY,                       -- unique row identifier
     cto_credit_balance_id   INT NOT NULL,                                         -- FK to the credit record that was debited
     leave_application_id    INT NOT NULL,                                         -- FK to the leave application that consumed the credit
-    amount_deducted         DECIMAL(10,2) NOT NULL,                               -- days taken from this specific credit
+    amount_deducted         DECIMAL(12,6) NOT NULL,                               -- days taken from this specific credit
     created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,                  -- when the deduction was recorded
 
     CONSTRAINT fk_deduct_log_balance
@@ -348,7 +348,7 @@ CREATE TABLE IF NOT EXISTS monthly_leave_credits (
     leave_type_id   INT NOT NULL,                                                 -- FK to leave_types.id (VL or SL only)
     year            SMALLINT NOT NULL,                                            -- calendar year of the credit
     month           TINYINT NOT NULL,                                             -- calendar month of the credit (1–12)
-    amount          DECIMAL(6, 2) NOT NULL,                                       -- number of days credited
+    amount          DECIMAL(12, 6) NOT NULL,                                      -- number of days credited
     transaction_id  INT NOT NULL,                                                 -- FK to leave_credit_transactions.id
     credited_at     DATETIME DEFAULT CURRENT_TIMESTAMP,                           -- timestamp when the credit was applied
 
@@ -532,8 +532,8 @@ CREATE TABLE IF NOT EXISTS vsc_old_credit_balances (
     id                              INT AUTO_INCREMENT PRIMARY KEY,               -- unique row identifier
     service_credit_application_id   INT NOT NULL,                                 -- FK to the source VSC service credit application
     employee_id                     INT NOT NULL,                                 -- FK to employees.id (denormalized for fast lookup)
-    original_balance                DECIMAL(10,2) NOT NULL,                       -- credit amount at time of application submission
-    remaining_balance               DECIMAL(10,2) NOT NULL,                       -- days still available (mirrors original; no per-credit deduction tracking)
+    original_balance                DECIMAL(12,6) NOT NULL,                       -- credit amount at time of application submission
+    remaining_balance               DECIMAL(12,6) NOT NULL,                       -- days still available (mirrors original; no per-credit deduction tracking)
     created_at                      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,          -- record creation timestamp
     updated_at                      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- last update timestamp
 
@@ -559,8 +559,8 @@ CREATE TABLE IF NOT EXISTS vsc_new_credit_balances (
     id                              INT AUTO_INCREMENT PRIMARY KEY,               -- unique row identifier
     service_credit_application_id   INT NOT NULL,                                 -- FK to the source VSC service credit application
     employee_id                     INT NOT NULL,                                 -- FK to employees.id (denormalized for fast lookup)
-    original_balance                DECIMAL(10,2) NOT NULL,                       -- credit amount at time of application submission
-    remaining_balance               DECIMAL(10,2) NOT NULL,                       -- days still available (mirrors original; no per-credit deduction tracking)
+    original_balance                DECIMAL(12,6) NOT NULL,                       -- credit amount at time of application submission
+    remaining_balance               DECIMAL(12,6) NOT NULL,                       -- days still available (mirrors original; no per-credit deduction tracking)
     created_at                      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,          -- record creation timestamp
     updated_at                      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- last update timestamp
 
@@ -587,7 +587,7 @@ CREATE TABLE IF NOT EXISTS vsc_deduction_log (
     leave_application_id    INT NOT NULL,                                                 -- FK to the leave application that caused this deduction
     credit_pool             ENUM('OLD', 'NEW') NOT NULL,                                 -- which VSC pool: OLD (vsc_old_credit_balances) or NEW (vsc_new_credit_balances)
     credit_balance_id       INT NOT NULL,                                                 -- ID within vsc_old_credit_balances or vsc_new_credit_balances depending on credit_pool
-    amount_deducted         DECIMAL(10, 2) NOT NULL,                                      -- days deducted from this specific credit
+    amount_deducted         DECIMAL(12, 6) NOT NULL,                                      -- days deducted from this specific credit
     created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,                          -- record creation timestamp
 
     CONSTRAINT fk_vsc_log_leave_app
@@ -629,7 +629,7 @@ CREATE TABLE IF NOT EXISTS leave_refunded_dates (
     leave_application_id    INT NOT NULL,                                       -- FK to the leave application that received the refund
     calendar_event_id       INT NOT NULL,                                       -- FK to the holiday calendar event that triggered the refund
     holiday_date            DATE NOT NULL,                                      -- the holiday date that was refunded
-    amount_refunded         DECIMAL(8, 2) NOT NULL,                             -- days credited back to the balance
+    amount_refunded         DECIMAL(12, 6) NOT NULL,                            -- days credited back to the balance
     credited_leave_type_id  INT NOT NULL,                                       -- FK to leave_types.id; the balance type that was credited
     refunded_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,                -- when the refund was recorded
 

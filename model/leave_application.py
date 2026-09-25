@@ -1568,8 +1568,8 @@ class LeaveApplication(BaseModel):
                 """
                 events = []  # accumulate (date_str, created_at_str, delta, source_type, source_id) tuples
                 for row in ledger:  # iterate every ledger row
-                    if row["source_type"] in ("LEAVE_APPLICATION", "MONETIZATION"):
-                        continue  # skip leave-app debits; handled in the app walk below
+                    if row["source_type"] in ("LEAVE_APPLICATION", "MONETIZATION", "HOLIDAY_REFUND"):
+                        continue  # skip leave-app debits and holiday refunds; refund is already reflected via effective_days=0
                     date     = str(row["transaction_date"])  # effective date as string
                     amt      = float(row["amount"])  # cast Decimal to float
                     delta    = amt if row["transaction_type"] == "CREDIT" else -amt  # + for credit, - for debit
