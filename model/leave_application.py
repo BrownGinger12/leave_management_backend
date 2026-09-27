@@ -1929,7 +1929,10 @@ class LeaveApplication(BaseModel):
                     "message": f"Invalid status. Must be one of: {', '.join(valid_statuses)}",
                 }
 
-            conditions = ["lt.code NOT IN ('CTO', 'VSC')", "la.is_deleted = 0"]  # always exclude CTO/VSC and soft-deleted
+            requested_code = filters.get("leave_type_code", "").upper() if filters.get("leave_type_code") else ""  # normalize requested leave type
+            conditions = ["la.is_deleted = 0"]  # always exclude soft-deleted records
+            if requested_code not in ("CTO", "VSC"):  # only exclude CTO/VSC when not explicitly filtering for them
+                conditions.append("lt.code NOT IN ('CTO', 'VSC')")
             params = []  # bound parameter values matching each placeholder
 
             if filters.get("year"):  # filter by calendar year of date_filed
