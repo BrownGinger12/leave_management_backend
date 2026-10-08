@@ -1,5 +1,6 @@
 from gateway.mysql_gateway import fetch_query, query, query_insert, recalculate_ledger_snapshots  # import gateway functions
 from datetime import date  # import date to determine the credit year
+from calendar import monthrange  # import monthrange to resolve the last day of a month
 import uuid  # import uuid to generate transaction numbers
 
 
@@ -183,25 +184,38 @@ class AnnualLeaveCredit:
     def post_monthly_vl_sl_credits(year: int = None, month: int = None) -> dict:
         """
         Credits 1.25 days of VL and 1.25 days of SL to every active NON_TEACHING employee
-        on the 1st of each month. Idempotent — safe to call multiple times; will not
-        double-post if a MONTHLY_CREDIT already exists for the given employee, leave type,
-        year, and month.
+        for a completed calendar month. The credit is earned by working the month, so it
+        is dated the last day of that month and is only posted once the month has ended.
+        Idempotent — safe to call multiple times; will not double-post if a MONTHLY_CREDIT
+        already exists for the given employee, leave type, year, and month.
 
         Parameters:
-            year (int): Calendar year. Defaults to the current year.
-            month (int): Calendar month (1–12). Defaults to the current month.
+            year (int): Calendar year of the month being credited. Defaults to the year
+                        of the month that most recently ended.
+            month (int): Calendar month (1–12) being credited. Defaults to the month that
+                         most recently ended, so a call on Oct 1 credits September.
 
         Returns:
             dict: statusCode 200 with credited/skipped counts, or an error dict.
         """
         try:
             today = date.today()  # reference date for defaults
-            if year is None:   # default to current year
-                year = today.year
-            if month is None:  # default to current month
-                month = today.month
+            if year is None or month is None:  # resolve the month that most recently ended
+                prev_year = today.year if today.month > 1 else today.year - 1  # roll back a year each January
+                prev_month = today.month - 1 if today.month > 1 else 12        # December when called in January
+                if year is None:   # default year follows the previous month
+                    year = prev_year
+                if month is None:  # default month is the one that just ended
+                    month = prev_month
 
-            credit_date = f"{year}-{month:02d}-01"  # transaction date is the 1st of the month
+            if (year, month) >= (today.year, today.month):  # refuse to credit a month still in progress
+                return {
+                    "statusCode": 400,
+                    "message": f"Cannot credit {year}-{month:02d} — the month has not ended yet",
+                }
+
+            last_day = monthrange(year, month)[1]  # number of days in the credited month
+            credit_date = f"{year}-{month:02d}-{last_day:02d}"  # credit is earned on the month's final day
 
             # ── Resolve VL and SL leave type IDs ────────────────────────────
             leave_types = fetch_query(  # fetch VL and SL type IDs in one query
@@ -231,72 +245,55 @@ class AnnualLeaveCredit:
 
             for emp in employees:  # iterate each eligible employee
                 emp_id = emp["id"]  # employee primary key
+                posted_any = False  # whether this employee received a new credit this run
 
-                # Idempotency: the UNIQUE KEY on monthly_leave_credits (employee, leave_type, year, month)
-                # is the authoritative guard — check VL row; if it exists both VL and SL were already posted
-                already = fetch_query(  # one check on VL covers both (they are posted together)
-                    """SELECT id FROM monthly_leave_credits
-                       WHERE employee_id = %s AND leave_type_id = %s
-                         AND year = %s AND month = %s
-                       LIMIT 1""",
-                    [emp_id, vl_id, year, month]
-                )
-                if already:  # already credited this month — skip
-                    skipped += 1
-                    continue
+                for code, lt_id in (("VL", vl_id), ("SL", sl_id)):  # credit each type independently
+                    # Idempotency is guarded against the ledger itself — the source of truth.
+                    # A guard row in monthly_leave_credits can drift from the ledger if its
+                    # insert fails, which would let the next run post a duplicate credit.
+                    already = fetch_query(  # look for an existing credit for this employee/type/month
+                        """SELECT id FROM leave_credit_transactions
+                           WHERE employee_id = %s AND leave_type_id = %s
+                             AND source_type = 'MONTHLY_CREDIT'
+                             AND transaction_date = %s
+                           LIMIT 1""",
+                        [emp_id, lt_id, credit_date]
+                    )
+                    if already:  # this type was already credited for this month
+                        continue  # move on to the next leave type
 
-                # ── Post VL credit ───────────────────────────────────────────
-                vl_result = query_insert(  # insert 1.25 days VL CREDIT into the ledger
-                    """INSERT INTO leave_credit_transactions
-                           (transaction_number, employee_id, leave_type_id, transaction_type,
-                            amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
-                       VALUES (%s, %s, %s, 'CREDIT', 1.25, 'MONTHLY_CREDIT', %s, %s, 0, %s)""",
-                    [
-                        AnnualLeaveCredit._generate_transaction_number(),  # unique TXN number
-                        emp_id,                                             # employee being credited
-                        vl_id,                                              # VL leave type
-                        year,                                               # source_id = year
-                        credit_date,                                        # 1st of the month
-                        f"Monthly VL Credit — {year}-{month:02d}",         # audit remark
-                    ]
-                )
-                if vl_result["statusCode"] != 200:  # VL insert failed — skip this employee
-                    continue
-                recalculate_ledger_snapshots(emp_id, vl_id)  # update VL balance cache
+                    ledger_result = query_insert(  # insert 1.25 days CREDIT into the ledger
+                        """INSERT INTO leave_credit_transactions
+                               (transaction_number, employee_id, leave_type_id, transaction_type,
+                                amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
+                           VALUES (%s, %s, %s, 'CREDIT', 1.25, 'MONTHLY_CREDIT', %s, %s, 0, %s)""",
+                        [
+                            AnnualLeaveCredit._generate_transaction_number(),  # unique TXN number
+                            emp_id,                                             # employee being credited
+                            lt_id,                                              # VL or SL leave type
+                            year,                                               # source_id = year
+                            credit_date,                                        # last day of the credited month
+                            f"Monthly {code} Credit — {year}-{month:02d}",      # audit remark
+                        ]
+                    )
+                    if ledger_result["statusCode"] != 200:  # insert failed — leave it for the next run to retry
+                        continue
 
-                query(  # record VL credit in monthly_leave_credits
-                    """INSERT INTO monthly_leave_credits
-                           (employee_id, leave_type_id, year, month, amount, transaction_id)
-                       VALUES (%s, %s, %s, %s, 1.25, %s)""",
-                    [emp_id, vl_id, year, month, vl_result["insertId"]]
-                )
+                    recalculate_ledger_snapshots(emp_id, lt_id)  # update the balance cache for this type
 
-                # ── Post SL credit ───────────────────────────────────────────
-                sl_result = query_insert(  # insert 1.25 days SL CREDIT into the ledger
-                    """INSERT INTO leave_credit_transactions
-                           (transaction_number, employee_id, leave_type_id, transaction_type,
-                            amount, source_type, source_id, transaction_date, balance_snapshot_after, remarks)
-                       VALUES (%s, %s, %s, 'CREDIT', 1.25, 'MONTHLY_CREDIT', %s, %s, 0, %s)""",
-                    [
-                        AnnualLeaveCredit._generate_transaction_number(),  # unique TXN number
-                        emp_id,                                             # employee being credited
-                        sl_id,                                              # SL leave type
-                        year,                                               # source_id = year
-                        credit_date,                                        # 1st of the month
-                        f"Monthly SL Credit — {year}-{month:02d}",         # audit remark
-                    ]
-                )
-                if sl_result["statusCode"] == 200:  # SL insert succeeded
-                    recalculate_ledger_snapshots(emp_id, sl_id)  # update SL balance cache
-
-                    query(  # record SL credit in monthly_leave_credits
+                    query(  # record the credit in monthly_leave_credits for reporting
                         """INSERT INTO monthly_leave_credits
                                (employee_id, leave_type_id, year, month, amount, transaction_id)
                            VALUES (%s, %s, %s, %s, 1.25, %s)""",
-                        [emp_id, sl_id, year, month, sl_result["insertId"]]
+                        [emp_id, lt_id, year, month, ledger_result["insertId"]]
                     )
 
-                credited += 1  # count this employee as credited
+                    posted_any = True  # at least one type was credited for this employee
+
+                if posted_any:  # employee received new credits this run
+                    credited += 1
+                else:  # both types were already credited
+                    skipped += 1
 
             return {  # return summary of the job run
                 "statusCode": 200,

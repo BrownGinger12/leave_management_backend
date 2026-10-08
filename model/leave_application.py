@@ -1910,10 +1910,12 @@ class LeaveApplication(BaseModel):
         """
         Searches leave applications using optional filters with pagination.
         All filters are optional and combinable. Results are ordered by date_filed DESC.
-        Supported filters: year (of date_filed), date_from, date_to, status, leave_type_code, school_id.
+        Supported filters: year (of date_filed), date_from, date_to, status, leave_type_code,
+        school_id, and name (employee name, employee number, or application number).
 
         Parameters:
-            filters (dict): Optional filter keys — year, date_from, date_to, status, leave_type_code, school_id.
+            filters (dict): Optional filter keys — year, date_from, date_to, status,
+                            leave_type_code, school_id, name.
             page (int): Page number (default 1).
             limit (int): Records per page (default 10).
 
@@ -1959,7 +1961,22 @@ class LeaveApplication(BaseModel):
                 conditions.append("e.school_id = %s")
                 params.append(filters["school_id"])
 
-            where_clause = "WHERE " + " AND ".join(conditions)  # always has at least the CTO/VSC exclusion
+            if filters.get("name"):  # free-text search on employee name, employee number, or application number
+                term = filters["name"].strip()  # drop surrounding whitespace from the search term
+                if term:  # ignore a term that was only whitespace
+                    like = f"%{term}%"  # substring match on either side
+                    conditions.append(  # match any name part, the full name in either order, or an ID field
+                        """(e.first_name LIKE %s
+                            OR e.last_name LIKE %s
+                            OR e.middle_name LIKE %s
+                            OR CONCAT(e.first_name, ' ', e.last_name) LIKE %s
+                            OR CONCAT(e.last_name, ' ', e.first_name) LIKE %s
+                            OR e.employee_number LIKE %s
+                            OR la.application_number LIKE %s)"""
+                    )
+                    params.extend([like] * 7)  # one bound value per LIKE placeholder above
+
+            where_clause = "WHERE " + " AND ".join(conditions)  # always has at least the soft-delete exclusion
 
             count_row = fetch_query(  # get total matching records for pagination metadata
                 f"""SELECT COUNT(*) AS total

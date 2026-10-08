@@ -57,10 +57,10 @@ scheduler.add_job(  # register the Jan 1 annual leave credit job
     replace_existing=True,     # replace if already registered (safe on hot reload)
 )
 
-scheduler.add_job(  # register the 1st-of-month VL/SL credit job for NON_TEACHING employees
-    func=AnnualLeaveCredit.post_monthly_vl_sl_credits,  # function to call
+scheduler.add_job(  # credit the month that just ended for NON_TEACHING employees
+    func=AnnualLeaveCredit.post_monthly_vl_sl_credits,  # defaults to the previous month
     trigger="cron",    # run on a fixed schedule
-    day=1,             # 1st of every month
+    day=1,             # 1st of every month — credits the month that just ended
     hour=0,            # at 12:50 AM (testing)
     minute=50,         # fifty minutes past midnight
     id="monthly_vl_sl_credit",   # unique job ID for deduplication

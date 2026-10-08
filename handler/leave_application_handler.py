@@ -140,7 +140,8 @@ def search_leave_applications():
     """
     Handles GET /leave-applications/search — paginated search with optional filters.
     ADMIN and DIVISION_PERSONNEL only.
-    Accepts query params: year, date_from, date_to, status, leave_type_code, school_id, page, limit.
+    Accepts query params: year, date_from, date_to, status, leave_type_code, school_id,
+    name, page, limit.
 
     Returns:
         JSON response with paginated matching leave applications and HTTP 200, or an error response.
@@ -153,6 +154,7 @@ def search_leave_applications():
             "status": request.args.get("status"),  # application status filter
             "leave_type_code": request.args.get("leave_type_code"),  # leave type code filter (e.g. VL, SL)
             "school_id": request.args.get("school_id", type=int),  # school/division filter
+            "name": request.args.get("name"),  # free-text search on employee name or ID numbers
         }
         page = request.args.get("page", default=1, type=int)  # read page number from query string
         limit = request.args.get("limit", default=10, type=int)  # read page size from query string

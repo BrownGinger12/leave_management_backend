@@ -17,8 +17,9 @@ class Dashboard(BaseModel):
     def get_on_leave(employee_type: str, query_date: str) -> dict:
         """
         Returns a list of all active employees of the given type who have an
-        approved (or pending) leave application that covers the specified date.
-        Excludes RETURNED and DISAPPROVED applications.
+        APPROVED leave application that covers the specified date.
+        Pending applications are excluded — only fully approved leave appears
+        on the calendar.
 
         Parameters:
             employee_type (str): 'TEACHING' or 'NON_TEACHING'.
@@ -46,7 +47,7 @@ class Dashboard(BaseModel):
                    JOIN leave_types lt ON lt.id = la.leave_type_id
                    LEFT JOIN schools s ON s.id = e.school_id
                    WHERE lad.leave_date = %s
-                     AND la.status NOT IN ('RETURNED', 'DISAPPROVED')
+                     AND la.status = 'APPROVED'
                      AND la.is_deleted = 0
                      AND e.is_active = 1
                      AND e.employee_type = %s
@@ -72,8 +73,9 @@ class Dashboard(BaseModel):
     @staticmethod
     def get_on_leave_count(employee_type: str, query_date: str) -> dict:
         """
-        Returns the count of employees currently on leave on the given date
+        Returns the count of employees on APPROVED leave on the given date
         alongside the total headcount for that employee type.
+        Matches get_on_leave so the count agrees with the calendar list.
 
         Parameters:
             employee_type (str): 'TEACHING' or 'NON_TEACHING'.
@@ -89,7 +91,7 @@ class Dashboard(BaseModel):
                    JOIN leave_applications la ON la.id = lad.leave_application_id
                    JOIN employees e ON e.id = la.employee_id
                    WHERE lad.leave_date = %s
-                     AND la.status NOT IN ('RETURNED', 'DISAPPROVED')
+                     AND la.status = 'APPROVED'
                      AND la.is_deleted = 0
                      AND e.is_active = 1
                      AND e.employee_type = %s""",

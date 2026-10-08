@@ -36,6 +36,7 @@ COMMON_MYSQLDUMP_PATHS = [  # ordered list of typical mysqldump locations on Win
     r"C:\Program Files\MySQL\MySQL Server 5.7\bin\mysqldump.exe",
     r"C:\Program Files (x86)\MySQL\MySQL Server 8.0\bin\mysqldump.exe",
     r"C:\xampp\mysql\bin\mysqldump.exe",
+    r"C:\xampp2\mysql\bin\mysqldump.exe",
     r"C:\wamp64\bin\mysql\mysql8.0\bin\mysqldump.exe",
 ]
 
