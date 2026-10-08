@@ -118,8 +118,12 @@ def get_next_sequence(year: int, seq_type: str) -> int:
 def recalculate_ledger_snapshots(employee_id: int, leave_type_id: int) -> float:
     """
     Recomputes balance_snapshot_after for every ledger row for a given employee and
-    leave type, ordered chronologically by transaction_date then id — like an Excel
-    running total. Updates employee_leave_balances cache with the final computed balance.
+    leave type — like an Excel running total. Rows are walked in the same order the
+    leave card uses: leave application debits by the application's date_filed, every
+    other row by its transaction_date, with id breaking ties. Ordering by date_filed
+    matters because a leave dated next month can be filed this month, and a monthly
+    credit dated at month end can be posted after it.
+    Updates employee_leave_balances cache with the final computed balance.
     Call this after every INSERT into leave_credit_transactions.
 
     Parameters:
@@ -129,13 +133,16 @@ def recalculate_ledger_snapshots(employee_id: int, leave_type_id: int) -> float:
     Returns:
         float: The final running balance after all transactions are applied in order.
     """
-    rows = fetch_query(  # fetch all transactions in chronological order; UT debits sort after leave debits on same date
-        """SELECT id, transaction_type, amount
-           FROM leave_credit_transactions
-           WHERE employee_id = %s AND leave_type_id = %s
-           ORDER BY transaction_date ASC,
-                    FIELD(source_type, 'UNDERTIME_TARDINESS') ASC,
-                    id ASC""",
+    rows = fetch_query(  # fetch all transactions in running-balance order; UT debits sort after leave debits on same date
+        """SELECT lct.id, lct.transaction_type, lct.amount
+           FROM leave_credit_transactions lct
+           LEFT JOIN leave_applications la
+                  ON la.id = lct.source_id
+                 AND lct.source_type = 'LEAVE_APPLICATION'
+           WHERE lct.employee_id = %s AND lct.leave_type_id = %s
+           ORDER BY COALESCE(la.date_filed, lct.transaction_date) ASC,
+                    FIELD(lct.source_type, 'UNDERTIME_TARDINESS') ASC,
+                    lct.id ASC""",
         [employee_id, leave_type_id]
     )
 

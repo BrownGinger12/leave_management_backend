@@ -251,12 +251,21 @@ class MonthlyLeaveCredit(BaseModel):
             # We fetch the full ledger for each leave type and recompute from scratch.
 
             def fetch_full_ledger(lt_id):
-                """Fetch all ledger rows for the given employee and leave type, ordered chronologically."""
+                """
+                Fetch all ledger rows for the given employee and leave type in running-balance
+                order. Leave application debits are ordered by the application's date_filed —
+                the same key the leave card walks — because a leave dated next month can be
+                filed this month. Every other row falls back to its transaction_date.
+                """
                 return fetch_query(
-                    """SELECT id, transaction_type, amount
-                       FROM leave_credit_transactions
-                       WHERE employee_id = %s AND leave_type_id = %s
-                       ORDER BY transaction_date ASC, id ASC""",
+                    """SELECT lct.id, lct.transaction_type, lct.amount
+                       FROM leave_credit_transactions lct
+                       LEFT JOIN leave_applications la
+                              ON la.id = lct.source_id
+                             AND lct.source_type = 'LEAVE_APPLICATION'
+                       WHERE lct.employee_id = %s AND lct.leave_type_id = %s
+                       ORDER BY COALESCE(la.date_filed, lct.transaction_date) ASC,
+                                lct.id ASC""",
                     [employee_id, lt_id]
                 ) or []
 
