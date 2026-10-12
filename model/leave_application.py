@@ -1931,10 +1931,10 @@ class LeaveApplication(BaseModel):
                     "message": f"Invalid status. Must be one of: {', '.join(valid_statuses)}",
                 }
 
-            requested_code = filters.get("leave_type_code", "").upper() if filters.get("leave_type_code") else ""  # normalize requested leave type
+            # Search spans every leave type, CTO and VSC included. The dedicated
+            # list endpoints split them (get_paginated excludes, get_cto_vsc_paginated
+            # isolates); a search filtered only by name or status must still find them.
             conditions = ["la.is_deleted = 0"]  # always exclude soft-deleted records
-            if requested_code not in ("CTO", "VSC"):  # only exclude CTO/VSC when not explicitly filtering for them
-                conditions.append("lt.code NOT IN ('CTO', 'VSC')")
             params = []  # bound parameter values matching each placeholder
 
             if filters.get("year"):  # filter by calendar year of date_filed
