@@ -44,7 +44,15 @@ class LeaveTransaction(BaseModel):
                         la.date_filed,
                         la.remarks,
                         la.other_leave_description,
+                        la.status,
+                        la.reason,
                         lt.name AS leave_type_name,
+                        sub_u.username AS submitted_by_username,
+                        CONCAT(sub_e.first_name, ' ', sub_e.last_name) AS submitted_by_name,
+                        CONCAT(stat_e.first_name, ' ', stat_e.last_name) AS status_updated_by_name,
+                        (SELECT MAX(lap.approved_at)
+                           FROM leave_approvals lap
+                          WHERE lap.leave_application_id = la.id) AS date_of_action,
                         GROUP_CONCAT(DATE_FORMAT(lad.leave_date, '%%m/%%d/%%Y')
                                      ORDER BY lad.leave_date ASC SEPARATOR ', ') AS leave_dates,
                         SUM(CASE WHEN lad.duration_type = 'HALF_DAY' THEN 0.5 ELSE 1.0 END) AS total_days
@@ -53,15 +61,19 @@ class LeaveTransaction(BaseModel):
                     JOIN employees e ON e.id = la.employee_id
                     JOIN leave_types lt ON lt.id = la.leave_type_id
                     LEFT JOIN schools s ON s.id = e.school_id
-                    WHERE la.status NOT IN ('RETURNED', 'DISAPPROVED')
-                      AND la.is_deleted = 0
+                    LEFT JOIN users sub_u ON sub_u.id = la.submitted_by
+                    LEFT JOIN employees sub_e ON sub_e.id = sub_u.employee_id
+                    LEFT JOIN employees stat_e ON stat_e.id = la.status_updated_by
+                    WHERE la.is_deleted = 0
                       AND e.is_active = 1
                       AND lad.leave_date BETWEEN %s AND %s
                     GROUP BY la.id, e.id, e.leave_card_number, la.application_number,
                              e.first_name, e.last_name, e.middle_name, e.sex,
                              e.position, e.employee_type, s.name,
                              la.date_filed, la.remarks, la.other_leave_description,
-                             lt.name
+                             la.status, la.reason, lt.name,
+                             sub_u.username, sub_e.first_name, sub_e.last_name,
+                             stat_e.first_name, stat_e.last_name
                     ORDER BY MIN(lad.leave_date) ASC, e.last_name ASC, e.first_name ASC""",
                 [date_from, date_to]
             ) or []
@@ -110,7 +122,13 @@ class LeaveTransaction(BaseModel):
                 if row.get("other_leave_description"):  # for "Others" leave type, use the specific description
                     remarks = row["other_leave_description"]  # override with the specific description
 
-                values = [  # ordered by column A–M (13 columns)
+                submitted_by = (row.get("submitted_by_name") or "").strip()  # name of the account that filed it
+                if not submitted_by:  # no linked employee on that account — fall back to the login name
+                    submitted_by = row.get("submitted_by_username") or ""
+
+                decision_reason = row.get("reason") or ""  # set by the approver when returning/disapproving
+
+                values = [  # ordered by column A–R (18 columns)
                     i + 1,                                    # A: sequential row number
                     row.get("leave_card_number") or "",       # B: leave card number
                     row.get("application_number") or "",      # C: application number
@@ -124,6 +142,11 @@ class LeaveTransaction(BaseModel):
                     row.get("leave_dates") or "",             # K: all leave dates incurred (comma-separated)
                     float(row["total_days"] or 0),            # L: total number of leave days
                     remarks,                                  # M: remarks / reason
+                    row.get("status") or "",                  # N: current status of the application
+                    decision_reason,                          # O: reason if returned/disapproved
+                    submitted_by,                             # P: who filed the application
+                    row.get("status_updated_by_name") or "",  # Q: who last changed the status
+                    fmt_date(row.get("date_of_action")),      # R: date of the most recent decision
                 ]
 
                 for col_idx, val in enumerate(values, start=1):  # write each value to its column cell
@@ -144,7 +167,7 @@ class LeaveTransaction(BaseModel):
             ws.cell(row=footer_row + 2, column=2).value = "_________________________"  # signature line
 
             page_row = footer_row + 4  # row for the page counter
-            ws.merge_cells(f"A{page_row}:M{page_row}")  # merge across all 13 columns
+            ws.merge_cells(f"A{page_row}:R{page_row}")  # merge across all 18 columns
             page_cell = ws.cell(row=page_row, column=1)  # write to the master cell of the merge
             page_cell.value = "page 1 of 1"  # static page label
             page_cell.alignment = Alignment(horizontal="center")  # centre-align the label
