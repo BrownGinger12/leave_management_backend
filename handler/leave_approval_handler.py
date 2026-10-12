@@ -1,4 +1,4 @@
-from flask import request, jsonify  # import request to read HTTP input and jsonify to build responses
+from flask import request, jsonify, g  # import request/jsonify for HTTP I/O, g for current user
 from model.leave_approval import LeaveApproval  # import the LeaveApproval model
 from gateway.auth_gateway import require_role  # import role decorator
 
@@ -9,6 +9,11 @@ def decide_leave_application():
     Handles POST /leave-approvals — processes an approver's APPROVED or REJECTED decision.
     ADMIN and DIVISION_PERSONNEL only.
 
+    The approver is always the authenticated user; any approver_id in the body is
+    ignored. The model matches approver_id against employees.id, so trusting the
+    client risks both a users.id/employees.id mix-up and one approver recording a
+    decision under another's name.
+
     Returns:
         JSON response with the approval record and HTTP 200, or an error response.
     """
@@ -17,6 +22,12 @@ def decide_leave_application():
 
         if not data:  # check if body is missing or not valid JSON
             return jsonify({"message": "No data provided"}), 400  # return 400 if empty
+
+        approver_employee_id = g.current_user.get("employee_id")  # linked employee of the logged-in user
+        if not approver_employee_id:  # token carries no linked employee — cannot attribute the decision
+            return jsonify({"message": "No employee linked to your account"}), 400
+
+        data["approver_id"] = approver_employee_id  # overwrite whatever the client sent
 
         response = LeaveApproval.decide(data)  # delegate decision logic to the model
         return jsonify(response), response["statusCode"]  # return the model response
